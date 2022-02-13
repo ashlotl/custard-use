@@ -1,0 +1,21 @@
+[package]
+name = "custard-use"
+version = "0.1.0"
+authors = ["Ashlotl <thesupremeliverwurst@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+cargo_metadata = {version = "0.14.1"}
+lazy_static = {version = "1.4.0"}
+libloading = { version = "0.7.0" }
+mopa = { version = "0.2.2" }
+rand = { version = "0.8.4"}
+ron = { version = "0.6.4" }
+serde = { version = "1.0.77", features = ["derive"] }
+thiserror = {version = "1.0.30" }
+threadpool = {version = "1.8.1" }
