@@ -1,8 +1,10 @@
 use std::{error::Error, sync::Arc};
 
 use crate::{
-	composition::loaded::loaded_datachunk::LoadedDatachunk,
-	dylib_management::safe_library::{core_crate::CoreCrate, library_type::LibraryType, load_types::DatachunkLoadFn},
+	dylib_management::{
+		runtime_compile,
+		safe_library::{core_crate::CoreCrate, library_type::LibraryType, load_types::DatachunkLoadFn},
+	},
 	identify::{crate_name::CrateName, custard_name::CustardName},
 	user_types::datachunk::Datachunk,
 };
@@ -16,9 +18,14 @@ pub(crate) struct SafeLibrary<'a> {
 }
 
 impl<'a> SafeLibrary<'a> {
-	pub fn new(is_core: bool, name: CrateName) -> Result<Self, Box<dyn Error>> {
-		let library_name = libloading::library_filename(name.get()).to_str().unwrap().to_owned();
-		let path = format!("custard_dylib_cache/{}", library_name.replace("-", "_"));
+	pub fn new(is_core: bool, name: CrateName, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
+		let library_name = libloading::library_filename(name.get()).to_str().unwrap().to_owned().replace("-", "_");
+
+		if recompile {
+			runtime_compile::compile(name.clone(), library_name.as_str(), debug)?;
+		}
+
+		let path = format!("custard_dylib_cache/{}", library_name);
 		println!("Loading library: {}", path);
 		let lib = unsafe { libloading::Library::new(path) }?;
 		println!("done");

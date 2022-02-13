@@ -1,8 +1,5 @@
 use crate::{
-	composition::{
-		loaded::{loaded_composition::LoadedComposition, loaded_datachunk::LoadedDatachunk},
-		unloaded::unloaded_crate::UnloadedCrate,
-	},
+	composition::{loaded::loaded_datachunk::LoadedDatachunk, unloaded::unloaded_crate::UnloadedCrate},
 	concurrency::fulfiller::Fulfiller,
 	dylib_management::safe_library::safe_library::SafeLibrary,
 	identify::{crate_name::CrateName, datachunk_name::DatachunkName, task_name::TaskName},
@@ -19,8 +16,8 @@ pub struct LoadedCrate<'lib> {
 }
 
 impl<'lib> LoadedCrate<'lib> {
-	pub fn new(name: &CrateName, unloaded_crate: &UnloadedCrate) -> Result<Self, Box<dyn Error>> {
-		let library = SafeLibrary::new(false, name.clone())?;
+	pub fn new(name: &CrateName, unloaded_crate: &UnloadedCrate, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
+		let library = SafeLibrary::new(false, name.clone(), recompile, debug)?;
 		let mut datachunks = BTreeMap::new();
 		// let mut tasks = BTreeMap::new();
 		for (datachunk_name, unloaded_datachunk) in &unloaded_crate.datachunks {

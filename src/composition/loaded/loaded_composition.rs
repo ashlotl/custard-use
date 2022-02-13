@@ -18,10 +18,10 @@ pub struct LoadedComposition<'lib> {
 }
 
 impl<'lib> LoadedComposition<'lib> {
-	fn new(composition: &UnloadedComposition) -> Result<Self, Box<dyn Error>> {
+	fn new(composition: &UnloadedComposition, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
 		let mut ret = Self { crates: BTreeMap::new() };
 		for (crate_name, unloaded_crate_contents) in &composition.crates {
-			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents)?;
+			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile, debug)?;
 			ret.crates.insert(crate_name.clone(), loaded_crate_contents);
 		}
 		//TODO: connect fulfillers
@@ -144,10 +144,10 @@ impl<'lib> LoadedComposition<'lib> {
 		Ok(())
 	}
 
-	pub fn check(unchecked: UnloadedComposition) -> Result<Self, Box<dyn Error>> {
+	pub fn check(unchecked: UnloadedComposition, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
 		Self::cross_access_check(&unchecked)?;
 		Self::ancestor_check(&unchecked)?;
-		Ok(Self::new(&unchecked)?)
+		Ok(Self::new(&unchecked, recompile, debug)?)
 	}
 
 	pub fn run(&self) -> Barrier {

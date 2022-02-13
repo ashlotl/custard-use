@@ -17,7 +17,7 @@ pub struct UnloadedComposition {
 }
 
 impl UnloadedComposition {
-	pub fn from_string(string: String) -> Result<Self, Box<dyn Error>> {
+	pub fn from_string(string: String, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(string.as_str());
 		let mut to_return = match res {
 			Ok(v) => v,
@@ -38,7 +38,7 @@ impl UnloadedComposition {
 					should_break = true;
 					continue;
 				}
-				let mut child_composition = Self::from_crate(to_return.children[child_i].clone())?;
+				let mut child_composition = Self::from_crate(to_return.children[child_i].clone(), recompile, debug)?;
 
 				traversal_tree.insert(Some(to_return.children[child_i].clone()), child_composition.children.clone());
 
@@ -72,8 +72,8 @@ impl UnloadedComposition {
 		Ok(())
 	}
 
-	fn from_crate(crate_name: CrateName) -> Result<Self, Box<dyn Error>> {
-		let loaded = SafeLibrary::new(true, crate_name)?;
+	fn from_crate(crate_name: CrateName, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
+		let loaded = SafeLibrary::new(true, crate_name, recompile, debug)?;
 		let composition_string = if let LibraryType::CoreLibrary(inner) = loaded.structure { (inner.composition)() } else { unreachable!() };
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(composition_string.as_str());
 		return match res {
