@@ -3,7 +3,7 @@ use crate::{
 		load_types::{DatachunkLoadFn, FFIResult, FFISafeString},
 		safe_library::{self, DebugMode, LibraryRecompile, SafeLibrary},
 	},
-	errors::load_errors::custard_load_datachunk_error::{CustardFFIAmbiguousStringError, CustardLoadDatachunkError},
+	errors::load_errors::custard_load_datachunk_error::{CustardLoadDatachunkError},
 	identify::crate_name::CrateName,
 	user_types::datachunk::Datachunk,
 };

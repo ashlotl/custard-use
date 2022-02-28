@@ -1,4 +1,4 @@
-use std::{error::Error, ops::Try};
+use std::{error::Error};
 
 use crate::user_types::datachunk::Datachunk;
 

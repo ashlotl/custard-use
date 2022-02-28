@@ -1,6 +1,6 @@
 use crate::{
 	composition::unloaded::{
-		unloaded_crate::{self, UnloadedCrate},
+		unloaded_crate::{UnloadedCrate},
 		unloaded_octask::UnloadedOCTask,
 	},
 	dylib_management::safe_library::{

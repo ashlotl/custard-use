@@ -1,6 +1,6 @@
-use std::{error::Error, pin::Pin, rc::Rc};
+use std::{error::Error, pin::Pin};
 
-use libloading::Symbol;
+
 
 use crate::{
 	dylib_management::safe_library::{

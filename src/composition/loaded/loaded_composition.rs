@@ -14,7 +14,6 @@ use crate::{
 	dylib_management::safe_library::safe_library::{DebugMode, LibraryRecompile},
 	errors::{
 		datachunk_errors::custard_datachunk_access_error::CustardDatachunkAccessError,
-		load_errors::custard_composition_requires_core_crate_error::CustardCompositionRequiresCoreCrateError,
 		task_composition_errors::{custard_not_in_cycle_error::CustardNotInCycleError, custard_unreachable_task_error::CustardUnreachableTaskError},
 	},
 	identify::{crate_name::CrateName, task_name::FullTaskName},

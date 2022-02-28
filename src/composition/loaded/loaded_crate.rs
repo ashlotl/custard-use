@@ -2,7 +2,6 @@ use crate::{
 	composition::{loaded::loaded_datachunk::LoadedDatachunk, unloaded::unloaded_crate::UnloadedCrate},
 	concurrency::fulfiller::Fulfiller,
 	dylib_management::safe_library::{
-		core_library::CoreLibrary,
 		safe_library::{DebugMode, LibraryRecompile, SafeLibrary},
 		user_library::UserLibrary,
 	},
