@@ -1,6 +1,12 @@
 use crate::{
-	composition::unloaded::{unloaded_crate::UnloadedCrate, unloaded_octask::UnloadedOCTask},
-	dylib_management::safe_library::{library_type::LibraryType, safe_library::SafeLibrary},
+	composition::unloaded::{
+		unloaded_crate::{self, UnloadedCrate},
+		unloaded_octask::UnloadedOCTask,
+	},
+	dylib_management::safe_library::{
+		core_library::CoreLibrary,
+		safe_library::{DebugMode, LibraryRecompile, SafeLibrary},
+	},
 	errors::parse_errors::{custard_composition_cycle_error::CustardCompositionCycleError, custard_ron_parse_error::CustardRonCompositionParseError},
 	identify::{crate_name::CrateName, task_name::FullTaskName},
 };
@@ -17,7 +23,7 @@ pub struct UnloadedComposition {
 }
 
 impl UnloadedComposition {
-	pub fn from_string(string: String, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
+	pub fn from_string(string: String, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(string.as_str());
 		let mut to_return = match res {
 			Ok(v) => v,
@@ -38,7 +44,7 @@ impl UnloadedComposition {
 					should_break = true;
 					continue;
 				}
-				let mut child_composition = Self::from_crate(to_return.children[child_i].clone(), recompile, debug)?;
+				let mut child_composition = Self::from_crate(to_return.children[child_i].clone(), recompile.clone(), debug.clone())?;
 
 				traversal_tree.insert(Some(to_return.children[child_i].clone()), child_composition.children.clone());
 
@@ -72,12 +78,17 @@ impl UnloadedComposition {
 		Ok(())
 	}
 
-	fn from_crate(crate_name: CrateName, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
-		let loaded = SafeLibrary::new(true, crate_name, recompile, debug)?;
-		let composition_string = if let LibraryType::CoreLibrary(inner) = loaded.structure { (inner.composition)() } else { unreachable!() };
+	fn from_crate(crate_name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
+		let loaded = Rc::new(CoreLibrary::new(crate_name, recompile, debug)?);
+		let composition_string = ((loaded.symbols.as_ref().unwrap().composition)()).into_rust()?.into_rust();
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(composition_string.as_str());
 		return match res {
-			Ok(v) => Ok(v),
+			Ok(mut v) => {
+				for (_, crate_contents) in &mut v.crates {
+					crate_contents.lib = Some(loaded.clone());
+				}
+				Ok(v)
+			}
 			Err(error) => return Err(Box::new(CustardRonCompositionParseError { error, relevant_ron: composition_string })),
 		};
 	}
@@ -108,7 +119,6 @@ impl UnloadedComposition {
 		traversal_list.push(current_node.clone());
 		for parent in &unloaded_task.parents {
 			if self.traverse_until(parent, traversal_list, for_each.clone()) {
-				//TODO: unsafe is gross
 				return true;
 			}
 		}

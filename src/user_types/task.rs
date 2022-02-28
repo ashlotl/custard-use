@@ -1,6 +1,6 @@
 use std::{
 	any::Any,
-	fmt::{Debug, Formatter},
+	fmt::Debug,
 	sync::{Arc, RwLock},
 };
 

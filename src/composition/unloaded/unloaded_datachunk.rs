@@ -5,7 +5,7 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 pub struct UnloadedDatachunk {
 	pub type_name: String,
-	pub deserialize: String,
+	pub deserialize_path: String,
 }
 
 impl Debug for UnloadedDatachunk {

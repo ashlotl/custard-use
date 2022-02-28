@@ -1,40 +1,48 @@
-use std::{error::Error, sync::Arc};
-
 use crate::{
-	dylib_management::{
-		runtime_compile,
-		safe_library::{core_crate::CoreCrate, library_type::LibraryType, load_types::DatachunkLoadFn},
-	},
+	dylib_management::runtime_compile,
 	identify::{crate_name::CrateName, custard_name::CustardName},
-	user_types::datachunk::Datachunk,
 };
 
-use libloading::{Library, Symbol};
+use libloading::Library;
 
-#[derive(Debug)]
-pub(crate) struct SafeLibrary<'a> {
-	pub(crate) structure: LibraryType<'a>,
-	lib: Library,
+use std::{error::Error, fmt, path::Path};
+
+#[derive(Clone)]
+pub enum LibraryRecompile {
+	Recompile,
+	TryCached,
+	InsistCached,
 }
 
-impl<'a> SafeLibrary<'a> {
-	pub fn new(is_core: bool, name: CrateName, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
-		let library_name = libloading::library_filename(name.get()).to_str().unwrap().to_owned().replace("-", "_");
+#[derive(Clone)]
+pub enum DebugMode {
+	Debug,
+	Release,
+}
 
-		if recompile {
-			runtime_compile::compile(name.clone(), library_name.as_str(), debug)?;
-		}
+pub trait SafeLibrary: fmt::Debug {
+	fn new(name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>>
+	where
+		Self: Sized;
 
-		let path = format!("custard_dylib_cache/{}", library_name);
-		println!("Loading library: {}", path);
-		let lib = unsafe { libloading::Library::new(path) }?;
-		println!("done");
-		let structure = if is_core { LibraryType::CoreLibrary(CoreCrate { composition: unsafe { (&*(&lib as *const Library)).get("composition".as_bytes())? } }) } else { LibraryType::UserLibrary };
-		Ok(Self { structure, lib })
+	fn get_crate_name(&self) -> &CrateName;
+	fn get_underlying_library(&self) -> &Library;
+}
+
+pub fn load_crate_as_library(name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<libloading::Library, Box<dyn Error>> {
+	let library_name = libloading::library_filename(name.get()).to_str().unwrap().to_owned().replace("-", "_");
+
+	let path = format!("custard_dylib_cache/{}", library_name);
+
+	let should_recompile = match recompile {
+		LibraryRecompile::Recompile => true,
+		LibraryRecompile::TryCached => !Path::exists(Path::new(&path)),
+		_ => false,
+	};
+
+	if should_recompile {
+		runtime_compile::compile(name.clone(), library_name.as_str(), debug)?;
 	}
 
-	pub fn load_datachunk(&self, type_name: &str, deserialize_str: &str) -> Result<Arc<dyn Datachunk>, Box<dyn Error>> {
-		let load_fn: Symbol<DatachunkLoadFn> = unsafe { self.lib.get(format!("__custard_datachunk__{}", type_name).as_bytes())? };
-		Ok(load_fn(deserialize_str)?)
-	}
+	Ok(unsafe { libloading::Library::new(path) }?)
 }

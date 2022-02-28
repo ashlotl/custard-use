@@ -1,3 +1,5 @@
+#![feature(try_trait)]
+
 pub mod composition;
 pub mod concurrency;
 pub mod dylib_management;

@@ -1,27 +1,35 @@
-use std::{cell::RefCell, collections::BTreeMap, error::Error, rc::Rc, sync::Barrier};
+use std::{
+	cell::RefCell,
+	collections::BTreeMap,
+	error::Error,
+	rc::Rc,
+	sync::{Arc, Barrier},
+};
 
 use crate::{
 	composition::{
 		loaded::loaded_crate::LoadedCrate,
 		unloaded::{unloaded_composition::UnloadedComposition, unloaded_octask::UnloadedOCTask},
 	},
+	dylib_management::safe_library::safe_library::{DebugMode, LibraryRecompile},
 	errors::{
 		datachunk_errors::custard_datachunk_access_error::CustardDatachunkAccessError,
+		load_errors::custard_composition_requires_core_crate_error::CustardCompositionRequiresCoreCrateError,
 		task_composition_errors::{custard_not_in_cycle_error::CustardNotInCycleError, custard_unreachable_task_error::CustardUnreachableTaskError},
 	},
 	identify::{crate_name::CrateName, task_name::FullTaskName},
 };
 
 #[derive(Debug)]
-pub struct LoadedComposition<'lib> {
-	crates: BTreeMap<CrateName, LoadedCrate<'lib>>,
+pub struct LoadedComposition {
+	crates: BTreeMap<CrateName, LoadedCrate>,
 }
 
-impl<'lib> LoadedComposition<'lib> {
-	fn new(composition: &UnloadedComposition, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
+impl LoadedComposition {
+	fn new(composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
 		let mut ret = Self { crates: BTreeMap::new() };
 		for (crate_name, unloaded_crate_contents) in &composition.crates {
-			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile, debug)?;
+			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone())?;
 			ret.crates.insert(crate_name.clone(), loaded_crate_contents);
 		}
 		//TODO: connect fulfillers
@@ -144,7 +152,7 @@ impl<'lib> LoadedComposition<'lib> {
 		Ok(())
 	}
 
-	pub fn check(unchecked: UnloadedComposition, recompile: bool, debug: bool) -> Result<Self, Box<dyn Error>> {
+	pub fn check(unchecked: UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Arc<dyn Error>> {
 		Self::cross_access_check(&unchecked)?;
 		Self::ancestor_check(&unchecked)?;
 		Ok(Self::new(&unchecked, recompile, debug)?)
