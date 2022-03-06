@@ -1,30 +1,12 @@
-use std::{error::Error};
+use std::{error::Error, sync::Arc};
 
-use crate::user_types::datachunk::Datachunk;
+use crate::user_types::{datachunk::Datachunk, task::Task};
 
-pub type DatachunkLoadFn = extern "C" fn(FFISafeString) -> Box<FFIResult<Box<dyn Datachunk>, Box<dyn Error>>>;
-
-#[repr(C)]
-pub struct FFISafeString {
-	ptr: *mut u8,
-	length: usize,
-	capacity: usize,
-}
-
-impl FFISafeString {
-	pub fn from_rust(mut input: String) -> Self {
-		let ret = Self { ptr: input.as_mut_ptr(), length: input.len(), capacity: input.capacity() };
-		std::mem::forget(input);
-		ret
-	}
-
-	pub fn into_rust(self) -> String {
-		let ret = unsafe { String::from_raw_parts(self.ptr, self.length, self.capacity) };
-		ret
-	}
-}
+pub type DatachunkLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<Box<dyn Datachunk>, Box<dyn Error>>>;
+pub type TaskLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<Arc<dyn Task + Send + Sync>, Box<dyn Error + Send + Sync>>>;
 
 #[repr(C)]
+#[derive(Clone)]
 pub enum FFIResult<T, E> {
 	Ok(T),
 	Err(E),
@@ -49,14 +31,17 @@ impl<T, E> FFIResult<T, E> {
 #[cfg(test)]
 mod tests {
 
-	use std::error::Error;
+	use std::{error::Error, sync::Arc};
 
 	//make sure no non-FFI-safe types are in use
 	use serde::Deserialize;
 
 	use crate::{
-		dylib_management::safe_library::load_types::{DatachunkLoadFn, FFIResult, FFISafeString},
-		user_types::datachunk::Datachunk,
+		dylib_management::safe_library::load_types::{DatachunkLoadFn, FFIResult, TaskLoadFn},
+		user_types::{
+			datachunk::Datachunk,
+			task::{Task, TaskClosureType},
+		},
 	};
 
 	#[derive(Debug, Deserialize)]
@@ -67,8 +52,7 @@ mod tests {
 	#[no_mangle]
 	#[allow(non_snake_case)]
 	#[deny(improper_ctypes_definitions)]
-	pub extern "C" fn datachunk_load_fn_test(from: FFISafeString) -> Box<FFIResult<Box<dyn Datachunk>, Box<dyn Error>>> {
-		let from: String = from.into_rust();
+	pub extern "C" fn datachunk_load_fn_test(from: Box<String>) -> Box<FFIResult<Box<dyn Datachunk>, Box<dyn Error>>> {
 		let created: Result<TestDatachunk, ron::Error> = ron::from_str(from.as_str());
 
 		match created {
@@ -82,5 +66,33 @@ mod tests {
 	}
 
 	#[allow(unused)]
-	const MATCH_TYPE: DatachunkLoadFn = datachunk_load_fn_test;
+	const DATACHUNK_MATCH_TYPE: DatachunkLoadFn = datachunk_load_fn_test;
+
+	#[derive(Debug, Deserialize)]
+	pub struct TestTask();
+
+	impl Task for TestTask {
+		fn run(self: Arc<Self>) -> TaskClosureType {
+			unimplemented!();
+		}
+	}
+
+	#[no_mangle]
+	#[allow(non_snake_case)]
+	#[deny(improper_ctypes_definitions)]
+	pub extern "C" fn task_load_fn_test(from: Box<String>) -> Box<FFIResult<Arc<dyn Task + Send + Sync>, Box<dyn Error + Send + Sync>>> {
+		let created: Result<TestTask, ron::Error> = ron::from_str(from.as_str());
+
+		match created {
+			Ok(v) => {
+				return Box::new(FFIResult::Ok(Arc::new(v)));
+			}
+			Err(e) => {
+				return Box::new(FFIResult::Err(Box::new(e)));
+			}
+		}
+	}
+
+	#[allow(unused)]
+	const TASK_MATCH_TYPE: TaskLoadFn = task_load_fn_test;
 }

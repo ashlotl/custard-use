@@ -1,12 +1,19 @@
 use crate::{
-	composition::{loaded::loaded_datachunk::LoadedDatachunk, unloaded::unloaded_crate::UnloadedCrate},
-	concurrency::fulfiller::Fulfiller,
+	composition::{
+		loaded::{loaded_datachunk::LoadedDatachunk, loaded_task::LoadedTask},
+		unloaded::unloaded_crate::UnloadedCrate,
+	},
+	concurrency::{fulfiller::Fulfiller, ready::Ready},
 	dylib_management::safe_library::{
 		safe_library::{DebugMode, LibraryRecompile, SafeLibrary},
 		user_library::UserLibrary,
 	},
 	errors::load_errors::custard_composition_requires_core_crate_error::CustardCompositionRequiresCoreCrateError,
-	identify::{crate_name::CrateName, datachunk_name::DatachunkName, task_name::TaskName},
+	identify::{
+		crate_name::CrateName,
+		datachunk_name::DatachunkName,
+		task_name::{FullTaskName, TaskName},
+	},
 };
 
 use std::{collections::BTreeMap, error::Error, sync::Arc};
@@ -29,11 +36,24 @@ impl LoadedCrate {
 		let mut datachunks = BTreeMap::new();
 		// let mut tasks = BTreeMap::new();
 		for (datachunk_name, unloaded_datachunk) in &unloaded_crate.datachunks {
-			datachunks.insert(datachunk_name, LoadedDatachunk::new(unloaded_datachunk, &user_library, &core_library)?);
+			datachunks.insert(datachunk_name.clone(), LoadedDatachunk::new(unloaded_datachunk, &user_library, &core_library)?);
 		}
 
 		println!("{:#?}", datachunks);
 
-		unimplemented!(); //TODO: unimplemented
+		let mut fulfillers = BTreeMap::new();
+
+		for (task_name, unloaded_task) in &unloaded_crate.tasks {
+			let full_name = FullTaskName { crate_name: name.clone(), task_name: task_name.clone() };
+			let fulfiller = Fulfiller {
+				children_chains: vec![],
+				done: Ready::new(unloaded_task.entrypoint),
+				prerequisites: vec![],
+				task: LoadedTask::new(full_name, unloaded_task, &user_library, &core_library)?,
+			};
+			fulfillers.insert(task_name.clone(), Arc::new(fulfiller));
+		}
+
+		Ok(Self { datachunks, tasks: fulfillers, library: user_library })
 	}
 }

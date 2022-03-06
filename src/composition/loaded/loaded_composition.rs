@@ -1,20 +1,24 @@
 use std::{
 	cell::RefCell,
-	collections::BTreeMap,
+	collections::{BTreeMap, BTreeSet},
 	error::Error,
 	rc::Rc,
-	sync::{Arc, Barrier},
+	sync::{Arc, Barrier, RwLock, Weak},
 };
+
+use threadpool::ThreadPool;
 
 use crate::{
 	composition::{
 		loaded::loaded_crate::LoadedCrate,
-		unloaded::{unloaded_composition::UnloadedComposition, unloaded_octask::UnloadedOCTask},
+		unloaded::{unloaded_composition::UnloadedComposition, unloaded_task::UnloadedTask},
 	},
+	concurrency::{fulfiller::Fulfiller, fulfiller_chain::FulfillerChain},
 	dylib_management::safe_library::safe_library::{DebugMode, LibraryRecompile},
 	errors::{
 		datachunk_errors::custard_datachunk_access_error::CustardDatachunkAccessError,
 		task_composition_errors::{custard_not_in_cycle_error::CustardNotInCycleError, custard_unreachable_task_error::CustardUnreachableTaskError},
+		tasks_result::TasksResult,
 	},
 	identify::{crate_name::CrateName, task_name::FullTaskName},
 };
@@ -22,23 +26,38 @@ use crate::{
 #[derive(Debug)]
 pub struct LoadedComposition {
 	crates: BTreeMap<CrateName, LoadedCrate>,
+	fulfiller_chains: Vec<Arc<FulfillerChain>>,
 }
 
 impl LoadedComposition {
 	fn new(composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
-		let mut ret = Self { crates: BTreeMap::new() };
+		let mut ret = Self { crates: BTreeMap::new(), fulfiller_chains: vec![] };
 		for (crate_name, unloaded_crate_contents) in &composition.crates {
 			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone())?;
 			ret.crates.insert(crate_name.clone(), loaded_crate_contents);
 		}
-		//TODO: connect fulfillers
+
+		ret.connect_fulfillers(composition)?;
+		ret.create_fulfiller_chains(composition)?;
+		ret.attach_fulfiller_chains()?;
+
 		Ok(ret)
+	}
+
+	pub fn attach_fulfiller_chains(&mut self) -> Result<(), Box<dyn Error>> {
+		for chain in &self.fulfiller_chains {
+			let first_node = self.crates.get(&chain.first_name.crate_name).unwrap().tasks.get(&chain.first_name.task_name).unwrap();
+			for prerequisite in &first_node.prerequisites {
+				let unsafe_borrow = unsafe { &mut *(&prerequisite.upgrade().unwrap().children_chains as *const _ as *mut Vec<Weak<FulfillerChain>>) };
+				unsafe_borrow.push(Arc::downgrade(chain));
+			}
+		}
+		Ok(())
 	}
 
 	fn ancestor_check(composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
 		for (crate_name, crate_contents) in &composition.crates {
 			for (task_name, _task_contents) in &crate_contents.tasks {
-				let mut first = true;
 				let mut found = false;
 				let mut entrypoint_exists = false;
 
@@ -47,15 +66,14 @@ impl LoadedComposition {
 				composition.traverse_until(
 					&start_node,
 					&mut traversal_list,
-					Rc::new(RefCell::new(|current, contents: &UnloadedOCTask| -> bool {
+					Rc::new(RefCell::new(|_current, contents: &UnloadedTask| -> bool {
 						if contents.entrypoint {
 							entrypoint_exists = true;
 						}
-						if !first && current == &start_node {
+						if contents.parents.contains(&start_node) {
 							found = true;
 							return true;
 						}
-						first = false;
 						return false;
 					})),
 				);
@@ -73,48 +91,76 @@ impl LoadedComposition {
 		Ok(())
 	}
 
-	fn are_unsynchronized(composition: &UnloadedComposition, task_name: FullTaskName, other_task_name: FullTaskName) -> bool {
-		let mut first_ab = true;
-		let mut found_ab = false;
+	fn connect_fulfillers(&mut self, composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
+		for (crate_name, unloaded_crate) in &composition.crates {
+			let loaded_crate = match self.crates.get(crate_name) {
+				Some(v) => v,
+				None => unreachable!(),
+			};
+			for (task_name, unloaded_task) in &unloaded_crate.tasks {
+				#[allow(unused_mut)]
+				let mut loaded_task = match loaded_crate.tasks.get(task_name) {
+					Some(v) => v,
+					None => unreachable!(),
+				};
+				let loaded_parents = unloaded_task
+					.parents
+					.iter()
+					.map(|parent_name| {
+						let loaded_parent_crate = match self.crates.get(&parent_name.crate_name) {
+							Some(v) => v,
+							None => unreachable!(),
+						};
+						let loaded_parent_task = match loaded_parent_crate.tasks.get(&parent_name.task_name) {
+							Some(v) => v,
+							None => unreachable!(),
+						};
+						Arc::downgrade(loaded_parent_task)
+					})
+					.collect();
 
-		let mut traversal_list = vec![];
-
-		composition.traverse_until(
-			&task_name.clone(),
-			&mut traversal_list,
-			Rc::new(RefCell::new(|current, _contents| -> bool {
-				if !first_ab && current == &other_task_name {
-					found_ab = true;
-					return true;
+				unsafe {
+					*(&loaded_task.prerequisites as *const _ as *mut Vec<Weak<Fulfiller>>) = loaded_parents;
 				}
-				first_ab = false;
-				return false;
-			})),
-		);
+			}
+		}
+		Ok(())
+	}
 
-		if !found_ab {
-			return true;
+	fn create_fulfiller_chains(&mut self, composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
+		//TODO: tests
+		let mut chains = vec![];
+		let mut traversed = BTreeSet::new();
+
+		loop {
+			let mut chain = vec![];
+			let mut chain_names = vec![];
+			let mut last_node = match composition.get_best_last_node_for_fulfiller_chain(&traversed) {
+				Some(v) => v,
+				None => break,
+			};
+
+			loop {
+				traversed.insert(last_node.clone());
+				let last_node_contents = composition.crates.get(&last_node.crate_name).unwrap().tasks.get(&last_node.task_name).unwrap();
+				chain.push(Arc::downgrade(self.crates.get(&last_node.crate_name).unwrap().tasks.get(&last_node.task_name).unwrap()));
+				chain_names.push(last_node);
+
+				if last_node_contents.parents.len() > 0 {
+					break;
+				}
+
+				last_node = last_node_contents.parents[0].clone();
+			}
+
+			chain.reverse();
+			let fulfiller_chain = FulfillerChain { first_name: chain_names.last().unwrap().clone(), chain };
+			chains.push(Arc::new(fulfiller_chain));
 		}
 
-		traversal_list.remove(0); //We want to find task_name again. We don't need to remove other_task_name from the list because it doesn't exist within it
+		self.fulfiller_chains = chains;
 
-		let mut first_ba = true;
-		let mut found_ba = false;
-
-		composition.traverse_until(
-			&other_task_name.clone(),
-			&mut traversal_list,
-			Rc::new(RefCell::new(|current, _contents| -> bool {
-				if !first_ba && current == &task_name {
-					found_ba = true;
-					return true;
-				}
-				first_ba = false;
-				return false;
-			})),
-		);
-
-		!(found_ab && found_ba)
+		Ok(())
 	}
 
 	fn cross_access_check(composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
@@ -128,7 +174,7 @@ impl LoadedComposition {
 						if task_name == other_task_name {
 							continue;
 						}
-						if !Self::are_unsynchronized(composition, FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() }, FullTaskName { crate_name: other_crate_name.clone(), task_name: other_task_name.clone() }) {
+						if !composition.are_unsynchronized(FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() }, FullTaskName { crate_name: other_crate_name.clone(), task_name: other_task_name.clone() }) {
 							continue;
 						}
 						for access in &task_contents.accesses {
@@ -158,6 +204,12 @@ impl LoadedComposition {
 	}
 
 	pub fn run(&self) -> Barrier {
+		let pool = ThreadPool::new(8); //TODO: make thread count and maybe other attributes configurable
+		let tasks_result = Arc::new(RwLock::new(TasksResult { errors: BTreeMap::new() }));
+		for chain in &self.fulfiller_chains {
+			chain.run(pool.clone(), tasks_result.clone());
+		}
+		std::thread::sleep(std::time::Duration::new(5, 0)); //TODO: replace with barrier system of some kind
 		unimplemented!() //TODO: LoadedComposition::run is not fully implemented
 	}
 }

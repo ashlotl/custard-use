@@ -3,18 +3,18 @@ use std::sync::{Arc, RwLock, Weak};
 use threadpool::ThreadPool;
 
 use crate::{
-	composition::loaded::loaded_octask::LoadedOCTask,
+	composition::loaded::loaded_task::LoadedTask,
 	concurrency::{fulfiller_chain::FulfillerChain, ready::Ready},
 	errors::tasks_result::TasksResult,
-	user_types::task::TaskClosureType,
+	identify::task_name::FullTaskName,
 };
 
 #[derive(Debug)]
-pub(crate) struct Fulfiller {
-	children_chains: Vec<Weak<FulfillerChain>>,
-	done: Ready,
-	prerequisites: Vec<Weak<Fulfiller>>,
-	task: LoadedOCTask,
+pub struct Fulfiller {
+	pub children_chains: Vec<Weak<FulfillerChain>>,
+	pub done: Ready,
+	pub prerequisites: Vec<Weak<Fulfiller>>,
+	pub task: LoadedTask,
 }
 
 impl Fulfiller {
@@ -27,13 +27,13 @@ impl Fulfiller {
 		true
 	}
 
-	pub(crate) fn run_task(&self, not_first: bool, pool: ThreadPool, tasks_result: Arc<RwLock<TasksResult>>) {
-		if not_first {
-			assert_eq!(self.prerequisites_complete(), true)
+	pub(crate) fn run_task(&self, name: &FullTaskName, pool: ThreadPool, tasks_result: Arc<RwLock<TasksResult>>) {
+		if !self.prerequisites_complete() {
+			return;
 		}
-		if let Err(e) = unsafe { (*(&self.task.closure as *const TaskClosureType as *mut TaskClosureType))(tasks_result.clone()) } {
+		if let Err(e) = (self.task.closure)(tasks_result.clone()) {
 			let mut g = tasks_result.write().unwrap();
-			g.errors.insert(self.task.name.clone(), e);
+			g.errors.insert(name.clone(), e);
 		}
 		self.done.release();
 		for child_chain in &self.children_chains {

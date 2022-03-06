@@ -1,8 +1,5 @@
 use crate::{
-	composition::unloaded::{
-		unloaded_crate::{UnloadedCrate},
-		unloaded_octask::UnloadedOCTask,
-	},
+	composition::unloaded::{unloaded_crate::UnloadedCrate, unloaded_task::UnloadedTask},
 	dylib_management::safe_library::{
 		core_library::CoreLibrary,
 		safe_library::{DebugMode, LibraryRecompile, SafeLibrary},
@@ -14,7 +11,12 @@ use crate::{
 use ron::{self};
 use serde::Deserialize;
 
-use std::{cell::RefCell, collections::BTreeMap, error::Error, rc::Rc};
+use std::{
+	cell::RefCell,
+	collections::{BTreeMap, BTreeSet},
+	error::Error,
+	rc::Rc,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct UnloadedComposition {
@@ -66,6 +68,50 @@ impl UnloadedComposition {
 		Ok(to_return)
 	}
 
+	pub fn are_unsynchronized(&self, task_name: FullTaskName, other_task_name: FullTaskName) -> bool {
+		let mut first_ab = true;
+		let mut found_ab = false;
+
+		let mut traversal_list = vec![];
+
+		self.traverse_until(
+			&task_name.clone(),
+			&mut traversal_list,
+			Rc::new(RefCell::new(|current, _contents| -> bool {
+				if !first_ab && current == &other_task_name {
+					found_ab = true;
+					return true;
+				}
+				first_ab = false;
+				return false;
+			})),
+		);
+
+		if !found_ab {
+			return true;
+		}
+
+		traversal_list.remove(0); //We want to find task_name again. We don't need to remove other_task_name from the list because it doesn't exist within it
+
+		let mut first_ba = true;
+		let mut found_ba = false;
+
+		self.traverse_until(
+			&other_task_name.clone(),
+			&mut traversal_list,
+			Rc::new(RefCell::new(|current, _contents| -> bool {
+				if !first_ba && current == &task_name {
+					found_ba = true;
+					return true;
+				}
+				first_ba = false;
+				return false;
+			})),
+		);
+
+		!(found_ab && found_ba)
+	}
+
 	fn recurse_traversal_tree(traversal_tree: &BTreeMap<Option<CrateName>, Vec<CrateName>>, traversal_tree_traversal_list: &mut Vec<Option<CrateName>>, active_node: Option<CrateName>) -> Result<(), Box<dyn Error>> {
 		traversal_tree_traversal_list.push(active_node.clone());
 		for subnode in traversal_tree.get(&active_node).unwrap() {
@@ -80,7 +126,7 @@ impl UnloadedComposition {
 
 	fn from_crate(crate_name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
 		let loaded = Rc::new(CoreLibrary::new(crate_name, recompile, debug)?);
-		let composition_string = ((loaded.symbols.as_ref().unwrap().composition)()).into_rust()?.into_rust();
+		let composition_string = ((loaded.symbols.as_ref().unwrap().composition)()).into_rust()?;
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(composition_string.as_str());
 		return match res {
 			Ok(mut v) => {
@@ -93,7 +139,46 @@ impl UnloadedComposition {
 		};
 	}
 
-	pub fn get_unloaded_task(&self, find_name: &FullTaskName) -> Option<&UnloadedOCTask> {
+	pub fn get_best_last_node_for_fulfiller_chain(&self, traversed: &BTreeSet<FullTaskName>) -> Option<FullTaskName> {
+		let mut candidates: Vec<(FullTaskName, usize)> = vec![];
+		for (crate_name, unloaded_crate) in &self.crates {
+			for (task_name, _) in &unloaded_crate.tasks {
+				let full_name = FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() };
+				if !traversed.contains(&full_name) {
+					let child_count = self.get_children_of(&full_name, |_, _| true).len();
+					if candidates.len() == 0 {
+						candidates.push((full_name, child_count));
+					} else {
+						for i in 0..candidates.len() {
+							if candidates[i].1 <= child_count {
+								candidates.insert(i, (full_name, child_count));
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+		if candidates.len() > 0 {
+			return Some(candidates[0].0.clone());
+		}
+		None
+	}
+
+	pub fn get_children_of(&self, parent_name: &FullTaskName, rule: impl Fn(&FullTaskName, &UnloadedTask) -> bool) -> Vec<FullTaskName> {
+		let mut ret = vec![];
+		for (crate_name, unloaded_crate) in &self.crates {
+			for (task_name, unloaded_task) in &unloaded_crate.tasks {
+				let full_name = FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() };
+				if unloaded_task.parents.contains(parent_name) && rule(&full_name, unloaded_task) {
+					ret.push(full_name);
+				}
+			}
+		}
+		ret
+	}
+
+	pub fn get_unloaded_task(&self, find_name: &FullTaskName) -> Option<&UnloadedTask> {
 		for (crate_name, crate_contents) in &self.crates {
 			if crate_name != &find_name.crate_name {
 				continue;
@@ -107,7 +192,7 @@ impl UnloadedComposition {
 		return None;
 	}
 
-	pub fn traverse_until<'a>(&'a self, current_node: &'a FullTaskName, traversal_list: &mut Vec<FullTaskName>, for_each: Rc<RefCell<dyn FnMut(&'a FullTaskName, &'a UnloadedOCTask) -> bool + 'a>>) -> bool {
+	pub fn traverse_until<'a>(&'a self, current_node: &'a FullTaskName, traversal_list: &mut Vec<FullTaskName>, for_each: Rc<RefCell<dyn FnMut(&'a FullTaskName, &'a UnloadedTask) -> bool + 'a>>) -> bool {
 		if traversal_list.contains(current_node) {
 			return false;
 		}

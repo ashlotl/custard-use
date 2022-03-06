@@ -15,6 +15,7 @@
 ///
 #[derive(Debug)]
 pub struct Ready {
+	//careful auto-implementing traits here. This whole struct is designed to be used in a race condition.
 	state: u64,
 	greatest_prereq: u64,
 	entrypoint: bool,
@@ -36,7 +37,7 @@ impl Ready {
 		unsafe {
 			(*(self as *const Self as *mut Self)).greatest_prereq = ostate.max(self.greatest_prereq);
 		}
-		ostate > self.state || self.entrypoint && self.state == 0
+		ostate > self.state || self.entrypoint && self.state == 0 || other as *const Self == self as *const Self
 	}
 }
 

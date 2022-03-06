@@ -1,16 +1,16 @@
 use std::{
-	any::Any,
+	error::Error,
 	fmt::Debug,
 	sync::{Arc, RwLock},
 };
 
 use crate::errors::tasks_result::TasksResult;
 
-pub type TaskClosureOutput = Result<(), Arc<dyn Any + Send + Sync + 'static>>;
-pub type TaskClosureType = Box<dyn Send + Sync + TaskClosureTrait>;
+pub type TaskClosureOutput = Result<(), Arc<dyn Error + Send + Sync>>;
+pub type TaskClosureType = Box<TaskClosureTrait>;
 
-pub trait TaskClosureTrait: Debug + FnMut(Arc<RwLock<TasksResult>>) -> TaskClosureOutput {}
+pub type TaskClosureTrait = dyn Fn(Arc<RwLock<TasksResult>>) -> TaskClosureOutput + Send + Sync;
 
 pub trait Task: Debug + Send + Sync {
-	fn run(&mut self) -> TaskClosureType;
+	fn run(self: Arc<Self>) -> TaskClosureType;
 }

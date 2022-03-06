@@ -1,6 +1,6 @@
 use crate::{
 	composition::unloaded::unloaded_datachunk::UnloadedDatachunk,
-	dylib_management::safe_library::{core_library::CoreLibrary, load_types::FFISafeString, user_library::UserLibrary},
+	dylib_management::safe_library::{core_library::CoreLibrary, user_library::UserLibrary},
 	user_types::datachunk::Datachunk,
 };
 
@@ -13,9 +13,9 @@ pub(crate) struct LoadedDatachunk {
 
 impl LoadedDatachunk {
 	pub fn new(unloaded_datachunk: &UnloadedDatachunk, user_library: &UserLibrary, core_library: &CoreLibrary) -> Result<Self, Box<dyn Error>> {
-		let deserialize_str = (core_library.symbols.as_ref().unwrap().unloaded_datachunk_contents)(FFISafeString::from_rust(unloaded_datachunk.deserialize_path.clone())).into_rust()?;
+		let deserialize_str = (core_library.symbols.as_ref().unwrap().unloaded_datachunk_contents)(Box::new(unloaded_datachunk.deserialize_path.clone())).into_rust()?;
 
-		let ret = Ok(Self { user_data: user_library.load_datachunk(unloaded_datachunk.type_name.as_str(), deserialize_str.into_rust().as_str())? });
+		let ret = Ok(Self { user_data: user_library.load_datachunk(unloaded_datachunk.type_name.as_str(), deserialize_str.as_str())? });
 		ret
 	}
 }
