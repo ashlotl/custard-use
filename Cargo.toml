@@ -12,6 +12,8 @@ edition = "2021"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
+custard-macros = {path = "../custard-macros"}
+
 cargo_metadata = {version = "0.14.1"}
 lazy_static = {version = "1.4.0"}
 libloading = { version = "0.7.0" }

@@ -25,7 +25,7 @@ pub struct UnloadedComposition {
 }
 
 impl UnloadedComposition {
-	pub fn from_string(string: String, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
+	pub fn from_string(string: String, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(string.as_str());
 		let mut to_return = match res {
 			Ok(v) => v,
@@ -46,7 +46,7 @@ impl UnloadedComposition {
 					should_break = true;
 					continue;
 				}
-				let mut child_composition = Self::from_crate(to_return.children[child_i].clone(), recompile.clone(), debug.clone())?;
+				let mut child_composition = Self::from_crate(to_return.children[child_i].clone(), recompile.clone(), debug.clone(), drop_list.clone())?;
 
 				traversal_tree.insert(Some(to_return.children[child_i].clone()), child_composition.children.clone());
 
@@ -124,8 +124,8 @@ impl UnloadedComposition {
 		Ok(())
 	}
 
-	fn from_crate(crate_name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
-		let loaded = Rc::new(CoreLibrary::new(crate_name, recompile, debug)?);
+	fn from_crate(crate_name: CrateName, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
+		let loaded = Rc::new(CoreLibrary::new(crate_name, recompile, debug, drop_list)?);
 		let composition_string = ((loaded.symbols.as_ref().unwrap().composition)()).into_rust()?;
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(composition_string.as_str());
 		return match res {

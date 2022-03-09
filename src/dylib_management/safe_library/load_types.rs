@@ -1,9 +1,12 @@
-use std::{error::Error, sync::Arc};
+use std::{
+	error::Error,
+	sync::{Arc, Mutex},
+};
 
 use crate::user_types::{datachunk::Datachunk, task::Task};
 
 pub type DatachunkLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<Box<dyn Datachunk>, Box<dyn Error>>>;
-pub type TaskLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<Arc<dyn Task + Send + Sync>, Box<dyn Error + Send + Sync>>>;
+pub type TaskLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<Task, Box<dyn Error + Send + Sync>>>;
 
 #[repr(C)]
 #[derive(Clone)]
@@ -31,16 +34,21 @@ impl<T, E> FFIResult<T, E> {
 #[cfg(test)]
 mod tests {
 
-	use std::{error::Error, sync::Arc};
+	use std::{
+		error::Error,
+		sync::{Arc, Mutex},
+	};
 
 	//make sure no non-FFI-safe types are in use
 	use serde::Deserialize;
 
 	use crate::{
 		dylib_management::safe_library::load_types::{DatachunkLoadFn, FFIResult, TaskLoadFn},
+		identify::task_name::FullTaskName,
 		user_types::{
 			datachunk::Datachunk,
-			task::{Task, TaskClosureType},
+			task::{Task, TaskClosureType, TaskData, TaskImpl},
+			task_control_flow::task_control_flow::TaskControlFlow,
 		},
 	};
 
@@ -71,8 +79,14 @@ mod tests {
 	#[derive(Debug, Deserialize)]
 	pub struct TestTask();
 
-	impl Task for TestTask {
-		fn run(self: Arc<Self>) -> TaskClosureType {
+	#[derive(Debug)]
+	pub struct TestTaskImpl();
+
+	impl TaskImpl for TestTaskImpl {
+		fn run(&self, _: &dyn TaskData, _: FullTaskName) -> TaskClosureType {
+			unimplemented!();
+		}
+		fn handle_control_flow_update(&self, _: &dyn TaskData, _: &FullTaskName, _: &FullTaskName, _: &TaskControlFlow) -> bool {
 			unimplemented!();
 		}
 	}
@@ -80,17 +94,8 @@ mod tests {
 	#[no_mangle]
 	#[allow(non_snake_case)]
 	#[deny(improper_ctypes_definitions)]
-	pub extern "C" fn task_load_fn_test(from: Box<String>) -> Box<FFIResult<Arc<dyn Task + Send + Sync>, Box<dyn Error + Send + Sync>>> {
-		let created: Result<TestTask, ron::Error> = ron::from_str(from.as_str());
-
-		match created {
-			Ok(v) => {
-				return Box::new(FFIResult::Ok(Arc::new(v)));
-			}
-			Err(e) => {
-				return Box::new(FFIResult::Err(Box::new(e)));
-			}
-		}
+	pub extern "C" fn task_load_fn_test(_from: Box<String>) -> Box<FFIResult<Task, Box<dyn Error + Send + Sync>>> {
+		unimplemented!()
 	}
 
 	#[allow(unused)]

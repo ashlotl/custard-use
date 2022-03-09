@@ -9,13 +9,13 @@ use crate::{
 use std::{
 	error::Error,
 	fmt::{self, Formatter},
-	sync::Arc,
+	sync::{Arc, Mutex},
 };
 
 pub struct LoadedTask {
 	pub name: FullTaskName,
 	pub closure: TaskClosureType,
-	pub user_data: Arc<dyn Task + Send + Sync>,
+	pub user_data: Task,
 	accesses: Vec<Access>,
 }
 
@@ -35,7 +35,11 @@ impl LoadedTask {
 
 		let user_data = user_library.load_task(unloaded_task.type_name.as_str(), deserialize_str.as_str())?;
 
-		let closure = user_data.clone().run();
+		let closure = {
+			let task_impl = user_data.task_impl.lock().unwrap();
+			let task_data = user_data.task_data.lock().unwrap();
+			task_impl.run(&*task_data, name.clone())
+		};
 
 		let ret = Ok(Self { name, accesses, closure, user_data });
 		ret

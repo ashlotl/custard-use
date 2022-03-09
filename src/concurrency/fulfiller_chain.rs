@@ -1,8 +1,11 @@
-use crate::{concurrency::fulfiller::Fulfiller, errors::tasks_result::TasksResult, identify::task_name::FullTaskName};
+use crate::{concurrency::fulfiller::Fulfiller, identify::task_name::FullTaskName};
 
 use threadpool::ThreadPool;
 
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{
+	atomic::{AtomicBool, AtomicUsize},
+	Arc, Barrier, Weak,
+};
 
 #[derive(Debug)]
 pub struct FulfillerChain {
@@ -11,26 +14,28 @@ pub struct FulfillerChain {
 }
 
 impl FulfillerChain {
-	pub fn run(&self, pool: ThreadPool, tasks_result: Arc<RwLock<TasksResult>>) {
+	pub fn run(&self, barrier: (Arc<AtomicUsize>, Arc<Barrier>), pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, should_reload: Arc<AtomicBool>) {
 		for fulfiller_i in 0..self.chain.len() {
 			let fulfiller = match self.chain[fulfiller_i].upgrade() {
 				Some(v) => v,
 				None => return, //program is exiting
 			};
-			fulfiller.run_task(&fulfiller.task.name, pool.clone(), tasks_result.clone());
+			fulfiller.run_task(pool.clone(), barrier.clone(), all_chains.clone(), should_reload.clone());
 		}
 	}
 
-	pub(crate) fn attempt_to_run(self: Arc<Self>, pool: ThreadPool, tasks_result: Arc<RwLock<TasksResult>>) {
-		let first_fulfiller = match self.chain[0].upgrade() {
-			Some(v) => v,
-			None => return, //program is exiting
+	pub(crate) fn attempt_to_run(self: Arc<Self>, barrier: (Arc<AtomicUsize>, Arc<Barrier>), pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, should_reload: Arc<AtomicBool>) {
+		let first_fulfiller = {
+			match self.chain[0].upgrade() {
+				Some(v) => v,
+				None => return, //program is exiting
+			}
 		};
+
 		if first_fulfiller.prerequisites_complete() {
 			let pool_inner = pool.clone();
-			let pool = pool.clone();
 			pool.execute(move || {
-				self.run(pool_inner, tasks_result);
+				self.clone().run(barrier.clone(), pool_inner, all_chains, should_reload);
 			});
 		}
 	}

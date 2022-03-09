@@ -3,7 +3,10 @@ use std::{
 	collections::{BTreeMap, BTreeSet},
 	error::Error,
 	rc::Rc,
-	sync::{Arc, Barrier, RwLock, Weak},
+	sync::{
+		atomic::{AtomicBool, AtomicUsize, Ordering},
+		Arc, Barrier, Weak,
+	},
 };
 
 use threadpool::ThreadPool;
@@ -18,7 +21,6 @@ use crate::{
 	errors::{
 		datachunk_errors::custard_datachunk_access_error::CustardDatachunkAccessError,
 		task_composition_errors::{custard_not_in_cycle_error::CustardNotInCycleError, custard_unreachable_task_error::CustardUnreachableTaskError},
-		tasks_result::TasksResult,
 	},
 	identify::{crate_name::CrateName, task_name::FullTaskName},
 };
@@ -26,14 +28,27 @@ use crate::{
 #[derive(Debug)]
 pub struct LoadedComposition {
 	crates: BTreeMap<CrateName, LoadedCrate>,
-	fulfiller_chains: Vec<Arc<FulfillerChain>>,
+	fulfiller_chains: Arc<Vec<Arc<FulfillerChain>>>,
+	pub(crate) task_completion: (Arc<AtomicUsize>, Arc<Barrier>),
+	should_reload: Arc<AtomicBool>,
 }
 
 impl LoadedComposition {
-	fn new(composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
-		let mut ret = Self { crates: BTreeMap::new(), fulfiller_chains: vec![] };
+	fn new(barrier: Arc<Barrier>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
+		let mut task_count = 0;
+		for (_, unloaded_crate_contents) in &composition.crates {
+			for (_, _) in &unloaded_crate_contents.tasks {
+				task_count += 1;
+			}
+		}
+		let mut ret = Self {
+			crates: BTreeMap::new(),
+			fulfiller_chains: Arc::new(vec![]),
+			task_completion: (Arc::new(AtomicUsize::new(task_count)), barrier),
+			should_reload: Arc::new(AtomicBool::new(false)),
+		};
 		for (crate_name, unloaded_crate_contents) in &composition.crates {
-			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone())?;
+			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone(), drop_list.clone())?;
 			ret.crates.insert(crate_name.clone(), loaded_crate_contents);
 		}
 
@@ -45,7 +60,7 @@ impl LoadedComposition {
 	}
 
 	pub fn attach_fulfiller_chains(&mut self) -> Result<(), Box<dyn Error>> {
-		for chain in &self.fulfiller_chains {
+		for chain in &*self.fulfiller_chains {
 			let first_node = self.crates.get(&chain.first_name.crate_name).unwrap().tasks.get(&chain.first_name.task_name).unwrap();
 			for prerequisite in &first_node.prerequisites {
 				let unsafe_borrow = unsafe { &mut *(&prerequisite.upgrade().unwrap().children_chains as *const _ as *mut Vec<Weak<FulfillerChain>>) };
@@ -141,12 +156,15 @@ impl LoadedComposition {
 			};
 
 			loop {
+				if traversed.contains(&last_node) {
+					break;
+				}
 				traversed.insert(last_node.clone());
 				let last_node_contents = composition.crates.get(&last_node.crate_name).unwrap().tasks.get(&last_node.task_name).unwrap();
 				chain.push(Arc::downgrade(self.crates.get(&last_node.crate_name).unwrap().tasks.get(&last_node.task_name).unwrap()));
 				chain_names.push(last_node);
 
-				if last_node_contents.parents.len() > 0 {
+				if last_node_contents.parents.len() > 1 {
 					break;
 				}
 
@@ -158,7 +176,7 @@ impl LoadedComposition {
 			chains.push(Arc::new(fulfiller_chain));
 		}
 
-		self.fulfiller_chains = chains;
+		self.fulfiller_chains = Arc::new(chains);
 
 		Ok(())
 	}
@@ -197,19 +215,23 @@ impl LoadedComposition {
 		Ok(())
 	}
 
-	pub fn check(unchecked: UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Arc<dyn Error>> {
+	pub fn check(barrier: Arc<Barrier>, unchecked: UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Arc<dyn Error>> {
 		Self::cross_access_check(&unchecked)?;
 		Self::ancestor_check(&unchecked)?;
-		Ok(Self::new(&unchecked, recompile, debug)?)
+		Ok(Self::new(barrier, &unchecked, recompile, debug, drop_list)?)
 	}
 
-	pub fn run(&self) -> Barrier {
+	pub fn run(&self) -> bool {
 		let pool = ThreadPool::new(8); //TODO: make thread count and maybe other attributes configurable
-		let tasks_result = Arc::new(RwLock::new(TasksResult { errors: BTreeMap::new() }));
-		for chain in &self.fulfiller_chains {
-			chain.run(pool.clone(), tasks_result.clone());
+
+		for chain in &*self.fulfiller_chains {
+			chain.run(self.task_completion.clone(), pool.clone(), self.fulfiller_chains.clone(), self.should_reload.clone());
 		}
-		std::thread::sleep(std::time::Duration::new(5, 0)); //TODO: replace with barrier system of some kind
-		unimplemented!() //TODO: LoadedComposition::run is not fully implemented
+
+		self.task_completion.1.wait();
+
+		let should_reload = self.should_reload.load(Ordering::Relaxed);
+
+		should_reload
 	}
 }

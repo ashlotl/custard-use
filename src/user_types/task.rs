@@ -1,16 +1,27 @@
+use mopa::mopafy;
+
+use crate::{identify::task_name::FullTaskName, user_types::task_control_flow::task_control_flow::TaskControlFlow};
+
 use std::{
-	error::Error,
 	fmt::Debug,
-	sync::{Arc, RwLock},
+	sync::{Arc, Mutex},
 };
 
-use crate::errors::tasks_result::TasksResult;
+pub type TaskClosureOutput = TaskControlFlow;
+pub type TaskClosureType = Box<TaskClosureTrait<dyn TaskData>>;
 
-pub type TaskClosureOutput = Result<(), Arc<dyn Error + Send + Sync>>;
-pub type TaskClosureType = Box<TaskClosureTrait>;
+pub type TaskClosureTrait<T> = Mutex<dyn Fn(Arc<Mutex<T>>) -> TaskClosureOutput + Send>;
 
-pub type TaskClosureTrait = dyn Fn(Arc<RwLock<TasksResult>>) -> TaskClosureOutput + Send + Sync;
+pub trait TaskData: Debug + mopa::Any + Send {}
+mopafy!(TaskData);
 
-pub trait Task: Debug + Send + Sync {
-	fn run(self: Arc<Self>) -> TaskClosureType;
+pub trait TaskImpl: Debug + Send {
+	fn run(&self, task_data: &dyn TaskData, task_name: FullTaskName) -> TaskClosureType;
+	fn handle_control_flow_update(&self, task_data: &dyn TaskData, this_task_name: &FullTaskName, other_task_name: &FullTaskName, control_flow: &TaskControlFlow) -> bool;
+}
+
+#[derive(Clone, Debug)]
+pub struct Task {
+	pub task_data: Arc<Mutex<dyn TaskData>>,
+	pub task_impl: Arc<Mutex<dyn TaskImpl>>,
 }

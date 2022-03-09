@@ -5,7 +5,7 @@ use crate::{
 
 use libloading::Library;
 
-use std::{error::Error, fmt, path::Path};
+use std::{cell::RefCell, error::Error, fmt, path::Path, rc::Rc};
 
 #[derive(Clone)]
 pub enum LibraryRecompile {
@@ -20,13 +20,28 @@ pub enum DebugMode {
 	Release,
 }
 
-pub trait SafeLibrary: fmt::Debug {
-	fn new(name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>>
+pub trait SafeLibrary: fmt::Debug + LibraryDrop {
+	fn new(name: CrateName, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<Library>>>) -> Result<Self, Box<dyn Error>>
 	where
 		Self: Sized;
 
 	fn get_crate_name(&self) -> &CrateName;
 	fn get_underlying_library(&self) -> &Library;
+	unsafe fn get_underlying_library_mut(&mut self) -> &mut Option<Library>;
+}
+
+pub trait LibraryDrop {
+	fn get_library_drop_list(&self) -> Rc<RefCell<Vec<Library>>>;
+	fn on_drop(&mut self)
+	where
+		Self: SafeLibrary,
+	{
+		let library_drop_list = self.get_library_drop_list();
+		unsafe {
+			let lib = self.get_underlying_library_mut().take().unwrap();
+			library_drop_list.borrow_mut().push(lib);
+		}
+	}
 }
 
 pub fn load_crate_as_library(name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<libloading::Library, Box<dyn Error>> {

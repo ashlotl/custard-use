@@ -16,7 +16,13 @@ use crate::{
 	},
 };
 
-use std::{collections::BTreeMap, error::Error, sync::Arc};
+use std::{
+	cell::RefCell,
+	collections::BTreeMap,
+	error::Error,
+	rc::Rc,
+	sync::{atomic::AtomicBool, Arc},
+};
 
 #[derive(Debug)]
 pub struct LoadedCrate {
@@ -27,12 +33,12 @@ pub struct LoadedCrate {
 }
 
 impl LoadedCrate {
-	pub fn new(name: &CrateName, unloaded_crate: &UnloadedCrate, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
+	pub fn new(name: &CrateName, unloaded_crate: &UnloadedCrate, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
 		let core_library = match &unloaded_crate.lib {
 			Some(v) => v,
 			None => return Err(Box::new(CustardCompositionRequiresCoreCrateError { offending_crate: name.clone() })),
 		};
-		let user_library = UserLibrary::new(name.clone(), recompile, debug)?;
+		let user_library = UserLibrary::new(name.clone(), recompile, debug, drop_list)?;
 		let mut datachunks = BTreeMap::new();
 		// let mut tasks = BTreeMap::new();
 		for (datachunk_name, unloaded_datachunk) in &unloaded_crate.datachunks {
@@ -46,6 +52,7 @@ impl LoadedCrate {
 		for (task_name, unloaded_task) in &unloaded_crate.tasks {
 			let full_name = FullTaskName { crate_name: name.clone(), task_name: task_name.clone() };
 			let fulfiller = Fulfiller {
+				cease: AtomicBool::new(false),
 				children_chains: vec![],
 				done: Ready::new(unloaded_task.entrypoint),
 				prerequisites: vec![],

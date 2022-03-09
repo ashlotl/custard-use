@@ -1,9 +1,9 @@
-use std::error::Error;
+use std::{cell::RefCell, error::Error, rc::Rc};
 
 use crate::{
 	dylib_management::safe_library::{
 		load_types::FFIResult,
-		safe_library::{self, DebugMode, LibraryRecompile, SafeLibrary},
+		safe_library::{self, DebugMode, LibraryDrop, LibraryRecompile, SafeLibrary},
 	},
 	identify::crate_name::CrateName,
 };
@@ -29,21 +29,42 @@ pub(crate) struct CoreLibrarySymbols<'lib> {
 pub struct CoreLibrary<'lib> {
 	name: CrateName,
 	pub(crate) symbols: Option<CoreLibrarySymbols<'lib>>,
-	lib: *mut libloading::Library, //leaked to avoid headaches
+	lib: Option<libloading::Library>,
+	drop_list: Rc<RefCell<Vec<libloading::Library>>>,
+}
+
+impl<'lib> Drop for CoreLibrary<'lib> {
+	fn drop(&mut self) {
+		self.on_drop()
+	}
+}
+
+impl<'lib> LibraryDrop for CoreLibrary<'lib> {
+	fn get_library_drop_list(&self) -> Rc<RefCell<Vec<libloading::Library>>> {
+		self.drop_list.clone()
+	}
 }
 
 impl<'lib> SafeLibrary for CoreLibrary<'lib> {
-	fn new(name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<Self, Box<dyn Error>> {
-		let lib = Box::leak(Box::new(safe_library::load_crate_as_library(name.clone(), recompile, debug)?)) as *mut libloading::Library;
+	fn new(name: CrateName, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
+		println!("constructing CoreLibrary");
+		let lib = Some(safe_library::load_crate_as_library(name.clone(), recompile, debug)?);
 
-		let mut ret = Self { name, lib, symbols: None };
+		println!("done loading");
+
+		let mut ret = Self { name, lib, symbols: None, drop_list };
 
 		unsafe {
-			let lib = &*(&*ret.lib as *const libloading::Library);
+			let lib = &*(ret.lib.as_ref().unwrap() as *const libloading::Library);
+			println!("unsafe heresy");
 			let composition = lib.get(b"__custard_composition__")?;
+			println!("got composition");
 			let unloaded_datachunk_contents = lib.get(b"__custard_unloaded_datachunk_contents__")?;
+			println!("got unloaded_datachunks");
 			let unloaded_task_contents = lib.get(b"__custard_unloaded_task_contents__")?;
+			println!("got unloaded_tasks");
 			ret.symbols = Some(CoreLibrarySymbols { composition, unloaded_datachunk_contents, unloaded_task_contents });
+			println!("done");
 			Ok(ret)
 		}
 	}
@@ -53,7 +74,11 @@ impl<'lib> SafeLibrary for CoreLibrary<'lib> {
 	}
 
 	fn get_underlying_library(&self) -> &libloading::Library {
-		unsafe { &*self.lib }
+		self.lib.as_ref().unwrap()
+	}
+
+	unsafe fn get_underlying_library_mut(&mut self) -> &mut Option<libloading::Library> {
+		&mut self.lib
 	}
 }
 
