@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, PartialEq)]
 pub struct UnloadedDatachunk {
 	pub type_name: String,
 	pub deserialize_path: String,

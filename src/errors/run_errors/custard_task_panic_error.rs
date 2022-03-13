@@ -9,6 +9,6 @@ use std::any::Any;
 #[derive(Debug, Error)]
 pub struct CustardTaskPanicError {
 	pub offending_task: FullTaskName,
-	pub error: Box<dyn Any + Send + Sync>,
+	pub error: Box<dyn Any + Send>,
 }
 display_from_debug!(CustardTaskPanicError);

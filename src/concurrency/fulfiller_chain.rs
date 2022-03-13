@@ -1,11 +1,8 @@
-use crate::{concurrency::fulfiller::Fulfiller, identify::task_name::FullTaskName};
+use crate::{concurrency::fulfiller::Fulfiller, identify::task_name::FullTaskName, instance_control_flow::InstanceControlFlow};
 
 use threadpool::ThreadPool;
 
-use std::sync::{
-	atomic::{AtomicBool, AtomicUsize},
-	Arc, Barrier, Weak,
-};
+use std::sync::{atomic::AtomicUsize, Arc, Barrier, Mutex, Weak};
 
 #[derive(Debug)]
 pub struct FulfillerChain {
@@ -14,28 +11,31 @@ pub struct FulfillerChain {
 }
 
 impl FulfillerChain {
-	pub fn run(&self, barrier: (Arc<AtomicUsize>, Arc<Barrier>), pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, should_reload: Arc<AtomicBool>) {
+	pub(super) fn run(&self, barrier: (Arc<AtomicUsize>, Arc<Barrier>), pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, instance_control_flow: Arc<Mutex<InstanceControlFlow>>) {
 		for fulfiller_i in 0..self.chain.len() {
 			let fulfiller = match self.chain[fulfiller_i].upgrade() {
 				Some(v) => v,
 				None => return, //program is exiting
 			};
-			fulfiller.run_task(pool.clone(), barrier.clone(), all_chains.clone(), should_reload.clone());
+			fulfiller.run_task(pool.clone(), barrier.clone(), all_chains.clone(), instance_control_flow.clone());
 		}
 	}
 
-	pub(crate) fn attempt_to_run(self: Arc<Self>, barrier: (Arc<AtomicUsize>, Arc<Barrier>), pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, should_reload: Arc<AtomicBool>) {
+	pub(crate) fn attempt_to_run(self: Arc<Self>, barrier: (Arc<AtomicUsize>, Arc<Barrier>), pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, instance_control_flow: Arc<Mutex<InstanceControlFlow>>) {
 		let first_fulfiller = {
 			match self.chain[0].upgrade() {
 				Some(v) => v,
-				None => return, //program is exiting
+				None => {
+					println!("warning: empty fulfiller");
+					return;
+				} //program is exiting
 			}
 		};
 
 		if first_fulfiller.prerequisites_complete() {
 			let pool_inner = pool.clone();
 			pool.execute(move || {
-				self.clone().run(barrier.clone(), pool_inner, all_chains, should_reload);
+				self.clone().run(barrier.clone(), pool_inner, all_chains, instance_control_flow);
 			});
 		}
 	}

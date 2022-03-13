@@ -7,7 +7,7 @@ use crate::{
 use std::error::Error;
 
 #[derive(Debug)]
-pub(crate) struct LoadedDatachunk {
+pub struct LoadedDatachunk {
 	user_data: Box<dyn Datachunk>,
 }
 

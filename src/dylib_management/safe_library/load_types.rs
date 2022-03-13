@@ -1,7 +1,4 @@
-use std::{
-	error::Error,
-	sync::{Arc, Mutex},
-};
+use std::error::Error;
 
 use crate::user_types::{datachunk::Datachunk, task::Task};
 
@@ -34,10 +31,7 @@ impl<T, E> FFIResult<T, E> {
 #[cfg(test)]
 mod tests {
 
-	use std::{
-		error::Error,
-		sync::{Arc, Mutex},
-	};
+	use std::error::Error;
 
 	//make sure no non-FFI-safe types are in use
 	use serde::Deserialize;

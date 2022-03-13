@@ -5,7 +5,7 @@ use crate::{
 
 use libloading::Library;
 
-use std::{cell::RefCell, error::Error, fmt, path::Path, rc::Rc};
+use std::{cell::RefCell, collections::BTreeMap, error::Error, fmt, fs, path::Path, rc::Rc};
 
 #[derive(Clone)]
 pub enum LibraryRecompile {
@@ -44,10 +44,30 @@ pub trait LibraryDrop {
 	}
 }
 
+static mut LIBRARY_USAGE: Option<BTreeMap<CrateName, u32>> = None;
+
+pub unsafe fn increment_library_usage(name: CrateName) -> u32 {
+	match &mut LIBRARY_USAGE {
+		Some(usage) => {
+			let got = *usage.get(&name).unwrap_or(&0);
+			usage.insert(name, got + 1);
+			got
+		}
+		None => {
+			LIBRARY_USAGE = Some(BTreeMap::new());
+			increment_library_usage(name)
+		}
+	}
+}
+
 pub fn load_crate_as_library(name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<libloading::Library, Box<dyn Error>> {
 	let library_name = libloading::library_filename(name.get()).to_str().unwrap().to_owned().replace("-", "_");
 
-	let path = format!("custard_dylib_cache/{}", library_name);
+	let usage = unsafe { increment_library_usage(name.clone()) };
+
+	let old_path = format!("custard_dylib_cache/{}", library_name);
+
+	let path = format!("{}{}", old_path, usage);
 
 	let should_recompile = match recompile {
 		LibraryRecompile::Recompile => true,
@@ -59,5 +79,12 @@ pub fn load_crate_as_library(name: CrateName, recompile: LibraryRecompile, debug
 		runtime_compile::compile(name.clone(), library_name.as_str(), debug)?;
 	}
 
-	Ok(unsafe { libloading::Library::new(path) }?)
+	if fs::try_exists(&old_path)? {
+		fs::copy(old_path, &path)?;
+	}
+
+	println!("A");
+	let ret = Ok(unsafe { libloading::Library::new(path) }?);
+	println!("B");
+	ret
 }

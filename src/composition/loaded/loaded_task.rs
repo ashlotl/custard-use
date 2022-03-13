@@ -9,7 +9,6 @@ use crate::{
 use std::{
 	error::Error,
 	fmt::{self, Formatter},
-	sync::{Arc, Mutex},
 };
 
 pub struct LoadedTask {

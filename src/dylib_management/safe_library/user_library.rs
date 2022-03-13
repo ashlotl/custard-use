@@ -10,12 +10,7 @@ use crate::{
 
 use libloading::Symbol;
 
-use std::{
-	cell::RefCell,
-	error::Error,
-	rc::Rc,
-	sync::{Arc, Mutex},
-};
+use std::{cell::RefCell, error::Error, rc::Rc};
 
 #[derive(Debug)]
 pub struct UserLibrary {

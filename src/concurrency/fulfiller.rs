@@ -1,10 +1,10 @@
 use std::{
-	any::Any,
 	cell::RefCell,
 	panic::{self, AssertUnwindSafe},
+	rc::Rc,
 	sync::{
 		atomic::{AtomicBool, AtomicUsize, Ordering},
-		Arc, Barrier, Weak,
+		Arc, Barrier, Mutex, Weak,
 	},
 };
 
@@ -15,7 +15,8 @@ use crate::{
 	concurrency::{fulfiller_chain::FulfillerChain, ready::Ready},
 	errors::run_errors::custard_task_panic_error::CustardTaskPanicError,
 	identify::task_name::FullTaskName,
-	user_types::{task::Task, task_control_flow::task_control_flow::TaskControlFlow},
+	instance_control_flow::InstanceControlFlow,
+	user_types::task_control_flow::task_control_flow::TaskControlFlow,
 };
 
 #[derive(Debug)]
@@ -24,7 +25,7 @@ pub struct Fulfiller {
 	pub children_chains: Vec<Weak<FulfillerChain>>,
 	pub done: Ready,
 	pub prerequisites: Vec<Weak<Fulfiller>>,
-	pub task: LoadedTask,
+	pub task: Option<LoadedTask>,
 }
 
 impl Fulfiller {
@@ -50,45 +51,54 @@ impl Fulfiller {
 				let cease = match task_result {
 					&TaskControlFlow::Continue => unreachable!(),
 					&TaskControlFlow::Err(_) | &TaskControlFlow::StopThis => {
-						let user_task = fulfiller.task.user_data.clone();
-						let task_impl = user_task.task_impl.lock().unwrap();
-						let user_data = user_task.task_data.lock().unwrap();
-						task_impl.handle_control_flow_update(&*user_data, current_task_name, &fulfiller.task.name, task_result)
+						let user_task = fulfiller.task.as_ref().unwrap().user_data.clone();
+						let task_impl_res = user_task.task_impl.lock();
+						let user_data_res = user_task.task_data.lock();
+						let ret = match (task_impl_res, user_data_res) {
+							(Ok(task_impl), Ok(user_data)) => task_impl.handle_control_flow_update(&*user_data, current_task_name, &fulfiller.task.as_ref().unwrap().name, task_result),
+							_ => {
+								println!("poisoned mutex");
+								true
+							}
+						};
+						ret
 					}
-					&TaskControlFlow::Reload => true,
-					&TaskControlFlow::ReloadCrate => &current_task_name.crate_name == &fulfiller.task.name.crate_name,
-					&TaskControlFlow::StopAll => true,
+					&(TaskControlFlow::FullReload | TaskControlFlow::PartialReload | TaskControlFlow::StopAll) => true,
 				};
 				if cease {
 					fulfiller.cease.store(true, Ordering::Relaxed);
 					let completed = barrier.0.fetch_sub(1, Ordering::Relaxed);
 					if completed == 1 {
-						barrier.1.wait();
+						barrier.1.wait(); //return to this call in CustardInstance
 					}
 				}
 			}
 		}
 	}
 
-	pub(crate) fn run_task(&self, pool: ThreadPool, barrier: (Arc<AtomicUsize>, Arc<Barrier>), all_chains: Arc<Vec<Arc<FulfillerChain>>>, should_reload: Arc<AtomicBool>) {
+	pub(crate) fn run_task(&self, pool: ThreadPool, barrier: (Arc<AtomicUsize>, Arc<Barrier>), all_chains: Arc<Vec<Arc<FulfillerChain>>>, instance_control_flow: Arc<Mutex<InstanceControlFlow>>) {
 		if !self.prerequisites_complete() {
 			return;
 		}
-		if !self.cease.load(Ordering::Relaxed) {
+		let cease = self.cease.load(Ordering::Relaxed);
+		if !cease {
+			println!("not cease");
+		}
+		if !cease {
 			let closure_result: TaskControlFlow;
 			let safe_closure_result = AssertUnwindSafe(RefCell::new(Some(TaskControlFlow::Continue)));
 			let safe_self = AssertUnwindSafe(self);
 			let panic_result = panic::catch_unwind(|| {
 				let user_task = &safe_self.task;
-				*safe_closure_result.borrow_mut() = Some((user_task.closure.lock().unwrap())(user_task.user_data.task_data.clone()));
+				*safe_closure_result.borrow_mut() = Some((user_task.as_ref().unwrap().closure.lock().unwrap())(user_task.as_ref().unwrap().user_data.task_data.clone()));
 			});
 
 			match panic_result {
-				Err(e) => unsafe {
-					let panic_error = CustardTaskPanicError { offending_task: self.task.name.clone(), error: Box::from_raw(Box::leak(e) as *mut _ as *mut (dyn Any + Send + Sync)) }; //TODO: seems sketchy
+				Err(e) => {
+					let panic_error = CustardTaskPanicError { offending_task: self.task.as_ref().unwrap().name.clone(), error: e };
 					println!("{}", panic_error);
-					closure_result = TaskControlFlow::Err(Box::new(panic_error));
-				},
+					closure_result = TaskControlFlow::Err(Rc::new(panic_error));
+				}
 				Ok(_) => {
 					closure_result = safe_closure_result.take().unwrap();
 				}
@@ -97,23 +107,22 @@ impl Fulfiller {
 			match &closure_result {
 				TaskControlFlow::Continue => {}
 				_ => {
-					if let TaskControlFlow::Reload = &closure_result {
-						should_reload.store(true, Ordering::Relaxed);
+					match &closure_result {
+						TaskControlFlow::FullReload => *instance_control_flow.lock().unwrap() = InstanceControlFlow::FullReload,
+						TaskControlFlow::PartialReload => *instance_control_flow.lock().unwrap() = InstanceControlFlow::PartialReload,
+						TaskControlFlow::Err(e) => println!("{}", e),
+						TaskControlFlow::StopAll => *instance_control_flow.lock().unwrap() = InstanceControlFlow::Stop,
+						_ => {}
 					}
 
-					Self::notify_tasks_of_control_flow_change(&self.task.name, &closure_result, &all_chains, barrier.clone());
-
-					self.cease.store(true, Ordering::Relaxed);
-					let completed = barrier.0.fetch_sub(1, Ordering::Relaxed);
-					if completed == 1 {
-						barrier.1.wait();
-					}
+					Self::notify_tasks_of_control_flow_change(&self.task.as_ref().unwrap().name, &closure_result, &all_chains, barrier.clone());
 				}
 			};
 		}
 		self.done.release();
+
 		for child_chain in &self.children_chains {
-			child_chain.upgrade().unwrap().attempt_to_run(barrier.clone(), pool.clone(), all_chains.clone(), should_reload.clone());
+			child_chain.upgrade().unwrap().attempt_to_run(barrier.clone(), pool.clone(), all_chains.clone(), instance_control_flow.clone());
 		}
 	}
 }

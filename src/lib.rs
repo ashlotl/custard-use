@@ -1,5 +1,5 @@
-#![feature(try_trait)]
 #![feature(arbitrary_self_types)]
+#![feature(path_try_exists)]
 
 pub mod composition;
 pub mod concurrency;
@@ -10,3 +10,4 @@ pub mod user_types;
 pub mod utils;
 
 pub mod custard_instance;
+pub mod instance_control_flow;

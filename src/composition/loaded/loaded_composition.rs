@@ -3,17 +3,14 @@ use std::{
 	collections::{BTreeMap, BTreeSet},
 	error::Error,
 	rc::Rc,
-	sync::{
-		atomic::{AtomicBool, AtomicUsize, Ordering},
-		Arc, Barrier, Weak,
-	},
+	sync::{atomic::AtomicUsize, Arc, Barrier, Mutex, Weak},
 };
 
 use threadpool::ThreadPool;
 
 use crate::{
 	composition::{
-		loaded::loaded_crate::LoadedCrate,
+		loaded::{loaded_crate::LoadedCrate, loaded_datachunk::LoadedDatachunk, loaded_task::LoadedTask},
 		unloaded::{unloaded_composition::UnloadedComposition, unloaded_task::UnloadedTask},
 	},
 	concurrency::{fulfiller::Fulfiller, fulfiller_chain::FulfillerChain},
@@ -22,19 +19,33 @@ use crate::{
 		datachunk_errors::custard_datachunk_access_error::CustardDatachunkAccessError,
 		task_composition_errors::{custard_not_in_cycle_error::CustardNotInCycleError, custard_unreachable_task_error::CustardUnreachableTaskError},
 	},
-	identify::{crate_name::CrateName, task_name::FullTaskName},
+	identify::{
+		crate_name::CrateName,
+		datachunk_name::DatachunkName,
+		task_name::{FullTaskName, TaskName},
+	},
+	instance_control_flow::InstanceControlFlow,
 };
+
+pub struct Checked {
+	#[allow(unused)]
+	a: (), //make this impossible to instantiate outside of crate
+}
 
 #[derive(Debug)]
 pub struct LoadedComposition {
-	crates: BTreeMap<CrateName, LoadedCrate>,
-	fulfiller_chains: Arc<Vec<Arc<FulfillerChain>>>,
+	pub(crate) crates: BTreeMap<CrateName, LoadedCrate>,
+	pub(crate) fulfiller_chains: Arc<Vec<Arc<FulfillerChain>>>,
 	pub(crate) task_completion: (Arc<AtomicUsize>, Arc<Barrier>),
-	should_reload: Arc<AtomicBool>,
+	pub(crate) control_flow: Arc<Mutex<InstanceControlFlow>>,
 }
 
 impl LoadedComposition {
-	fn new(barrier: Arc<Barrier>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
+	pub fn new(barrier: Arc<Barrier>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>, _checked: Checked) -> Result<Self, Box<dyn Error>> {
+		Self::new_with_baggage(barrier, composition, recompile, debug, drop_list, _checked, BTreeMap::new())
+	}
+
+	pub(crate) fn new_with_baggage(barrier: Arc<Barrier>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>, _checked: Checked, mut old_crates: BTreeMap<CrateName, (BTreeMap<TaskName, LoadedTask>, BTreeMap<DatachunkName, LoadedDatachunk>)>) -> Result<Self, Box<dyn Error>> {
 		let mut task_count = 0;
 		for (_, unloaded_crate_contents) in &composition.crates {
 			for (_, _) in &unloaded_crate_contents.tasks {
@@ -45,10 +56,12 @@ impl LoadedComposition {
 			crates: BTreeMap::new(),
 			fulfiller_chains: Arc::new(vec![]),
 			task_completion: (Arc::new(AtomicUsize::new(task_count)), barrier),
-			should_reload: Arc::new(AtomicBool::new(false)),
+			control_flow: Arc::new(Mutex::new(InstanceControlFlow::Continue)),
 		};
 		for (crate_name, unloaded_crate_contents) in &composition.crates {
-			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone(), drop_list.clone())?;
+			let old_crate = old_crates.get_mut(crate_name);
+			println!("old crate: {:#?}", old_crate);
+			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone(), drop_list.clone(), old_crate)?;
 			ret.crates.insert(crate_name.clone(), loaded_crate_contents);
 		}
 
@@ -215,23 +228,26 @@ impl LoadedComposition {
 		Ok(())
 	}
 
-	pub fn check(barrier: Arc<Barrier>, unchecked: UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Arc<dyn Error>> {
-		Self::cross_access_check(&unchecked)?;
-		Self::ancestor_check(&unchecked)?;
-		Ok(Self::new(barrier, &unchecked, recompile, debug, drop_list)?)
+	pub fn check(unchecked: &UnloadedComposition) -> Result<Checked, Arc<dyn Error>> {
+		Self::cross_access_check(unchecked)?;
+		Self::ancestor_check(unchecked)?;
+		Ok(Checked { a: () })
 	}
 
-	pub fn run(&self) -> bool {
+	pub fn run(&self) -> InstanceControlFlow {
 		let pool = ThreadPool::new(8); //TODO: make thread count and maybe other attributes configurable
 
 		for chain in &*self.fulfiller_chains {
-			chain.run(self.task_completion.clone(), pool.clone(), self.fulfiller_chains.clone(), self.should_reload.clone());
+			chain.clone().attempt_to_run(self.task_completion.clone(), pool.clone(), self.fulfiller_chains.clone(), self.control_flow.clone());
 		}
 
+		println!("2");
+
 		self.task_completion.1.wait();
+		println!("tasks completed");
 
-		let should_reload = self.should_reload.load(Ordering::Relaxed);
+		let control_flow = self.control_flow.lock().unwrap().clone();
 
-		should_reload
+		control_flow
 	}
 }

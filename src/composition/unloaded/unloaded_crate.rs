@@ -16,3 +16,9 @@ pub struct UnloadedCrate {
 	#[serde(default)]
 	pub(crate) lib: Option<Rc<CoreLibrary<'static>>>,
 }
+
+impl PartialEq for UnloadedCrate {
+	fn eq(&self, other: &Self) -> bool {
+		self.datachunks == other.datachunks && self.tasks == other.tasks
+	}
+}
