@@ -3,7 +3,7 @@ use std::{
 	collections::{BTreeMap, BTreeSet},
 	error::Error,
 	rc::Rc,
-	sync::{atomic::AtomicUsize, Arc, Barrier, Mutex, Weak},
+	sync::{Arc, Mutex, Weak},
 };
 
 use threadpool::ThreadPool;
@@ -13,7 +13,11 @@ use crate::{
 		loaded::{loaded_crate::LoadedCrate, loaded_datachunk::LoadedDatachunk, loaded_task::LoadedTask},
 		unloaded::{unloaded_composition::UnloadedComposition, unloaded_task::UnloadedTask},
 	},
-	concurrency::{fulfiller::Fulfiller, fulfiller_chain::FulfillerChain},
+	concurrency::{
+		fulfiller::{Fulfiller, Quit},
+		fulfiller_chain::FulfillerChain,
+		possibly_poisoned_mutex::PossiblyPoisonedMutex,
+	},
 	dylib_management::safe_library::safe_library::{DebugMode, LibraryRecompile},
 	errors::{
 		datachunk_errors::custard_datachunk_access_error::CustardDatachunkAccessError,
@@ -36,16 +40,17 @@ pub struct Checked {
 pub struct LoadedComposition {
 	pub(crate) crates: BTreeMap<CrateName, LoadedCrate>,
 	pub(crate) fulfiller_chains: Arc<Vec<Arc<FulfillerChain>>>,
-	pub(crate) task_completion: (Arc<AtomicUsize>, Arc<Barrier>),
-	pub(crate) control_flow: Arc<Mutex<InstanceControlFlow>>,
+	pub(crate) task_completion: Arc<Quit>,
+	pub(crate) task_count: usize,
+	pub(crate) control_flow: Arc<PossiblyPoisonedMutex<InstanceControlFlow>>,
 }
 
 impl LoadedComposition {
-	pub fn new(barrier: Arc<Barrier>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>, _checked: Checked) -> Result<Self, Box<dyn Error>> {
-		Self::new_with_baggage(barrier, composition, recompile, debug, drop_list, _checked, BTreeMap::new())
+	pub fn new(quit: Option<Arc<Quit>>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>, _checked: Checked) -> Result<Self, Box<dyn Error>> {
+		Self::new_with_baggage(quit, composition, recompile, debug, drop_list, _checked, BTreeMap::new())
 	}
 
-	pub(crate) fn new_with_baggage(barrier: Arc<Barrier>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>, _checked: Checked, mut old_crates: BTreeMap<CrateName, (BTreeMap<TaskName, LoadedTask>, BTreeMap<DatachunkName, LoadedDatachunk>)>) -> Result<Self, Box<dyn Error>> {
+	pub(crate) fn new_with_baggage(quit: Option<Arc<Quit>>, composition: &UnloadedComposition, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>, _checked: Checked, mut old_crates: BTreeMap<CrateName, (BTreeMap<TaskName, LoadedTask>, BTreeMap<DatachunkName, LoadedDatachunk>)>) -> Result<Self, Box<dyn Error>> {
 		let mut task_count = 0;
 		for (_, unloaded_crate_contents) in &composition.crates {
 			for (_, _) in &unloaded_crate_contents.tasks {
@@ -55,8 +60,12 @@ impl LoadedComposition {
 		let mut ret = Self {
 			crates: BTreeMap::new(),
 			fulfiller_chains: Arc::new(vec![]),
-			task_completion: (Arc::new(AtomicUsize::new(task_count)), barrier),
-			control_flow: Arc::new(Mutex::new(InstanceControlFlow::Continue)),
+			task_completion: match quit {
+				Some(v) => v,
+				None => Arc::new(Quit::new(task_count)),
+			},
+			task_count,
+			control_flow: Arc::new(PossiblyPoisonedMutex::new(Mutex::new(InstanceControlFlow::Continue))),
 		};
 		for (crate_name, unloaded_crate_contents) in &composition.crates {
 			let old_crate = old_crates.get_mut(crate_name);
@@ -205,7 +214,7 @@ impl LoadedComposition {
 						if task_name == other_task_name {
 							continue;
 						}
-						if !composition.are_unsynchronized(FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() }, FullTaskName { crate_name: other_crate_name.clone(), task_name: other_task_name.clone() }) {
+						if !composition.are_tasks_unsynchronized(FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() }, FullTaskName { crate_name: other_crate_name.clone(), task_name: other_task_name.clone() }) {
 							continue;
 						}
 						for access in &task_contents.accesses {
@@ -241,12 +250,12 @@ impl LoadedComposition {
 			chain.clone().attempt_to_run(self.task_completion.clone(), pool.clone(), self.fulfiller_chains.clone(), self.control_flow.clone());
 		}
 
-		println!("2");
+		println!("main thread wait");
 
-		self.task_completion.1.wait();
+		self.task_completion.main_thread_wait();
 		println!("tasks completed");
 
-		let control_flow = self.control_flow.lock().unwrap().clone();
+		let control_flow = self.control_flow.lock().clone();
 
 		control_flow
 	}

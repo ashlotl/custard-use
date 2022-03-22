@@ -18,6 +18,10 @@ use std::{
 	rc::Rc,
 };
 
+/// Set this variable to allow crate dependencies to cycle. This is not reccomended for dependency management reasons.
+const ENVIRONMENT_VAR_STR_ALLOW_DEPENDENCY_CYCLES: &'static str = "CUSTARD_ALLOW_DEPENDENCY_CYCLES";
+
+/// Stores the fundamental information about a composition before user crates are dynamically loaded.
 #[derive(Debug, Deserialize)]
 pub struct UnloadedComposition {
 	pub(crate) crates: BTreeMap<CrateName, UnloadedCrate>,
@@ -25,11 +29,29 @@ pub struct UnloadedComposition {
 }
 
 impl UnloadedComposition {
-	pub fn from_string(string: String, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
-		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(string.as_str());
+	/// Create an unloaded composition from the deserializable string. Note that this requires a drop list as an argument (creating an unloaded composition requires dynamically loading core crates), so you will have to be careful to pass in a value that is only dropped once the composition and any memory it may have allocated has been freed. As a consequence this is very unsafe:
+	/// ```ignore
+	/// let mut some_string: String;
+	///
+	/// {
+	/// 	let drop_list = Rc::new(RefCell::new(vec![]));
+	///
+	/// 	{
+	/// 		let composition = from_string(to_deserialize, recompile, debug, drop_list).unwrap();
+	///
+	/// 		some_string = composition.get_best_last_node_for_fulfiller_chain(traversal_set).unwrap().crate_name.get().to_owned();//some random carelessness allows some_string to now internally have a pointer to memory owned by a dynamic library
+	/// 	}//composition is dropped before drop_list--this is good
+	///
+	/// }//drop_list is dropped, and here problems start
+	///
+	/// some_other_func(some_string);//almost certainly segfaults because some_string no longer points to memory that belongs to us
+	/// ```
+	/// To save on headaches all of this is handled by [CustardInstance](crate::custard_instance::CustardInstance), but this method and struct are left public because it may be useful at runtime to study the present composition, and check it before a reload (keep in mind, reloads--see [CustardInstance](crate::custard_instance::CustardInstance)--run the risk of panicking if not carefully checked before initiation).
+	pub unsafe fn from_string(to_deserialize: String, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
+		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(to_deserialize.as_str());
 		let mut to_return = match res {
 			Ok(v) => v,
-			Err(error) => return Err(Box::new(CustardRonCompositionParseError { error, relevant_ron: string })),
+			Err(error) => return Err(Box::new(CustardRonCompositionParseError { error, relevant_ron: to_deserialize })),
 		};
 
 		let mut traversal_tree = BTreeMap::<Option<CrateName>, Vec<CrateName>>::new();
@@ -55,20 +77,21 @@ impl UnloadedComposition {
 			}
 		}
 
-		if match std::env::var("CUSTARD_ALLOW_DEPENDENCY_CYCLES") {
+		if match std::env::var(ENVIRONMENT_VAR_STR_ALLOW_DEPENDENCY_CYCLES) {
 			Ok(v) => v != "true" && v != "1" && v != "yes",
 			Err(std::env::VarError::NotPresent) => true,
 			_ => false,
 		} {
 			//prevent a dependency cycle
 			let mut traversal_tree_traversal_list = vec![];
-			Self::recurse_traversal_tree(&traversal_tree, &mut traversal_tree_traversal_list, None)?;
+			Self::recurse_crate_traversal_tree(&traversal_tree, &mut traversal_tree_traversal_list, None)?;
 		}
 
 		Ok(to_return)
 	}
 
-	pub fn are_unsynchronized(&self, task_name: FullTaskName, other_task_name: FullTaskName) -> bool {
+	/// Determine if two tasks are unsynchronized. This is determined by doing a search of their ancestors and seeing if they reach a common ancestor (in which case they are unsynchronized) before each other (in which case they must be synchronized).
+	pub fn are_tasks_unsynchronized(&self, task_name: FullTaskName, other_task_name: FullTaskName) -> bool {
 		let mut first_ab = true;
 		let mut found_ab = false;
 
@@ -112,13 +135,13 @@ impl UnloadedComposition {
 		!(found_ab && found_ba)
 	}
 
-	fn recurse_traversal_tree(traversal_tree: &BTreeMap<Option<CrateName>, Vec<CrateName>>, traversal_tree_traversal_list: &mut Vec<Option<CrateName>>, active_node: Option<CrateName>) -> Result<(), Box<dyn Error>> {
+	fn recurse_crate_traversal_tree(traversal_tree: &BTreeMap<Option<CrateName>, Vec<CrateName>>, traversal_tree_traversal_list: &mut Vec<Option<CrateName>>, active_node: Option<CrateName>) -> Result<(), Box<dyn Error>> {
 		traversal_tree_traversal_list.push(active_node.clone());
 		for subnode in traversal_tree.get(&active_node).unwrap() {
 			if traversal_tree_traversal_list.contains(&Some(subnode.clone())) {
 				return Err(Box::new(CustardCompositionCycleError { offending_crate: active_node.clone() }));
 			}
-			Self::recurse_traversal_tree(traversal_tree, traversal_tree_traversal_list, Some(subnode.clone()))?;
+			Self::recurse_crate_traversal_tree(traversal_tree, traversal_tree_traversal_list, Some(subnode.clone()))?;
 		}
 		traversal_tree_traversal_list.pop();
 		Ok(())

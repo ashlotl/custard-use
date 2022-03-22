@@ -3,7 +3,7 @@ use crate::{
 		loaded::{loaded_datachunk::LoadedDatachunk, loaded_task::LoadedTask},
 		unloaded::unloaded_crate::UnloadedCrate,
 	},
-	concurrency::{fulfiller::Fulfiller, ready::Ready},
+	concurrency::{fulfiller::Fulfiller, possibly_poisoned_mutex::PossiblyPoisonedMutex, ready::Ready},
 	dylib_management::safe_library::{
 		safe_library::{DebugMode, LibraryRecompile, SafeLibrary},
 		user_library::UserLibrary,
@@ -21,14 +21,13 @@ use std::{
 	collections::BTreeMap,
 	error::Error,
 	rc::Rc,
-	sync::{atomic::AtomicBool, Arc},
+	sync::{Arc, Mutex},
 };
 
 #[derive(Debug)]
 pub struct LoadedCrate {
 	pub(crate) datachunks: BTreeMap<DatachunkName, Option<LoadedDatachunk>>,
 	pub(crate) tasks: BTreeMap<TaskName, Arc<Fulfiller>>,
-	pub should_reload: Arc<AtomicBool>,
 }
 
 impl LoadedCrate {
@@ -62,7 +61,8 @@ impl LoadedCrate {
 		for (task_name, unloaded_task) in &unloaded_crate.tasks {
 			let full_name = FullTaskName { crate_name: name.clone(), task_name: task_name.clone() };
 			let fulfiller = Fulfiller {
-				cease: AtomicBool::new(false),
+				cease: Mutex::new(false),
+				error: Mutex::new(false),
 				children_chains: vec![],
 				done: Ready::new(unloaded_task.entrypoint),
 				prerequisites: vec![],
@@ -82,6 +82,6 @@ impl LoadedCrate {
 			fulfillers.insert(task_name.clone(), Arc::new(fulfiller));
 		}
 
-		Ok(Self { datachunks, tasks: fulfillers, should_reload: Arc::new(AtomicBool::new(false)) })
+		Ok(Self { datachunks, tasks: fulfillers })
 	}
 }

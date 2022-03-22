@@ -1,11 +1,13 @@
-use std::{error::Error, rc::Rc};
+use std::{collections::BTreeSet, error::Error, rc::Rc, sync::Arc};
+
+use crate::identify::crate_name::CrateName;
 
 #[derive(Clone, Debug)]
 pub enum TaskControlFlow {
 	Continue,
 	Err(Rc<dyn Error>),
 	FullReload,
-	PartialReload,
+	PartialReload(Arc<BTreeSet<CrateName>>),
 	StopAll,
 	StopThis,
 }

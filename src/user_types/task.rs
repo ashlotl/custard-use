@@ -1,6 +1,6 @@
 use mopa::mopafy;
 
-use crate::{identify::task_name::FullTaskName, user_types::task_control_flow::task_control_flow::TaskControlFlow};
+use crate::{concurrency::possibly_poisoned_mutex::PossiblyPoisonedMutex, identify::task_name::FullTaskName, user_types::task_control_flow::task_control_flow::TaskControlFlow};
 
 use std::{
 	fmt::Debug,
@@ -10,7 +10,7 @@ use std::{
 pub type TaskClosureOutput = TaskControlFlow;
 pub type TaskClosureType = Box<TaskClosureTrait<dyn TaskData>>;
 
-pub type TaskClosureTrait<T> = Mutex<dyn Fn(Arc<Mutex<T>>) -> TaskClosureOutput + Send>;
+pub type TaskClosureTrait<T> = Mutex<dyn Fn(Arc<PossiblyPoisonedMutex<T>>) -> TaskClosureOutput + Send>;
 
 pub trait TaskData: Debug + mopa::Any + Send {}
 mopafy!(TaskData);
@@ -22,6 +22,6 @@ pub trait TaskImpl: Debug + Send {
 
 #[derive(Clone, Debug)]
 pub struct Task {
-	pub task_data: Arc<Mutex<dyn TaskData>>,
-	pub task_impl: Arc<Mutex<dyn TaskImpl>>,
+	pub task_data: Arc<PossiblyPoisonedMutex<dyn TaskData>>,
+	pub task_impl: Arc<PossiblyPoisonedMutex<dyn TaskImpl>>,
 }
