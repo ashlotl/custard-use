@@ -7,6 +7,7 @@ use crate::{
 	instance_control_flow::InstanceControlFlow,
 };
 
+use log::warn;
 use threadpool::ThreadPool;
 
 use std::sync::{Arc, Weak};
@@ -34,16 +35,11 @@ impl FulfillerChain {
 			match self.chain[0].upgrade() {
 				Some(v) => v,
 				None => {
-					println!("warning: empty fulfiller");
-					return;
-				} //program is exiting
+					warn!("Found empty fulfiller at start of chain, should have name {:?}.", self.first_name);
+					return; //program is exiting
+				}
 			}
 		};
-
-		// if barrier.2.load(Ordering::Relaxed) {
-		// 	println!("due to a panic this is exiting");
-		// 	return;
-		// }
 
 		if first_fulfiller.prerequisites_complete() {
 			let pool_inner = pool.clone();

@@ -1,13 +1,3 @@
-use std::{
-	cell::RefCell,
-	collections::{BTreeMap, BTreeSet},
-	error::Error,
-	rc::Rc,
-	sync::{Arc, Mutex, Weak},
-};
-
-use threadpool::ThreadPool;
-
 use crate::{
 	composition::{
 		loaded::{loaded_crate::LoadedCrate, loaded_datachunk::LoadedDatachunk, loaded_task::LoadedTask},
@@ -31,6 +21,17 @@ use crate::{
 	instance_control_flow::InstanceControlFlow,
 };
 
+use log::info;
+use threadpool::ThreadPool;
+
+use std::{
+	cell::RefCell,
+	collections::{BTreeMap, BTreeSet},
+	error::Error,
+	rc::Rc,
+	sync::{Arc, Mutex, Weak},
+};
+
 pub struct Checked {
 	#[allow(unused)]
 	a: (), //make this impossible to instantiate outside of crate
@@ -41,7 +42,6 @@ pub struct LoadedComposition {
 	pub(crate) crates: BTreeMap<CrateName, LoadedCrate>,
 	pub(crate) fulfiller_chains: Arc<Vec<Arc<FulfillerChain>>>,
 	pub(crate) task_completion: Arc<Quit>,
-	pub(crate) task_count: usize,
 	pub(crate) control_flow: Arc<PossiblyPoisonedMutex<InstanceControlFlow>>,
 }
 
@@ -64,12 +64,13 @@ impl LoadedComposition {
 				Some(v) => v,
 				None => Arc::new(Quit::new(task_count)),
 			},
-			task_count,
 			control_flow: Arc::new(PossiblyPoisonedMutex::new(Mutex::new(InstanceControlFlow::Continue))),
 		};
 		for (crate_name, unloaded_crate_contents) in &composition.crates {
 			let old_crate = old_crates.get_mut(crate_name);
-			println!("old crate: {:#?}", old_crate);
+			if old_crate.is_some() {
+				info!("Matched crate {:?} to old crate, reusing.", crate_name);
+			}
 			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone(), drop_list.clone(), old_crate)?;
 			ret.crates.insert(crate_name.clone(), loaded_crate_contents);
 		}
@@ -82,6 +83,7 @@ impl LoadedComposition {
 	}
 
 	pub fn attach_fulfiller_chains(&mut self) -> Result<(), Box<dyn Error>> {
+		info!("Attaching fulfiller chains to fulfillers.");
 		for chain in &*self.fulfiller_chains {
 			let first_node = self.crates.get(&chain.first_name.crate_name).unwrap().tasks.get(&chain.first_name.task_name).unwrap();
 			for prerequisite in &first_node.prerequisites {
@@ -89,10 +91,12 @@ impl LoadedComposition {
 				unsafe_borrow.push(Arc::downgrade(chain));
 			}
 		}
+		info!("Attached fulfiller chains to fulfillers.");
 		Ok(())
 	}
 
 	fn ancestor_check(composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
+		info!("Checking connection rules for unloaded composition.");
 		for (crate_name, crate_contents) in &composition.crates {
 			for (task_name, _task_contents) in &crate_contents.tasks {
 				let mut found = false;
@@ -124,11 +128,12 @@ impl LoadedComposition {
 				}
 			}
 		}
-
+		info!("Success checking connection rules for unloaded composition.");
 		Ok(())
 	}
 
 	fn connect_fulfillers(&mut self, composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
+		info!("Connecting fulfiller shared references.");
 		for (crate_name, unloaded_crate) in &composition.crates {
 			let loaded_crate = match self.crates.get(crate_name) {
 				Some(v) => v,
@@ -161,10 +166,12 @@ impl LoadedComposition {
 				}
 			}
 		}
+		info!("Connected fulfiller shared references.");
 		Ok(())
 	}
 
 	fn create_fulfiller_chains(&mut self, composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
+		info!("Generating optimal fulfiller chains.");
 		//TODO: tests
 		let mut chains = vec![];
 		let mut traversed = BTreeSet::new();
@@ -200,10 +207,12 @@ impl LoadedComposition {
 
 		self.fulfiller_chains = Arc::new(chains);
 
+		info!("Generated optimal fulfiller chains.");
 		Ok(())
 	}
 
 	fn cross_access_check(composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
+		info!("Checking unloaded composition for datachunk access violations.");
 		for (crate_name, crate_contents) in &composition.crates {
 			for (task_name, task_contents) in &crate_contents.tasks {
 				for (other_crate_name, other_crate_contents) in &composition.crates {
@@ -234,29 +243,36 @@ impl LoadedComposition {
 				}
 			}
 		}
+		info!("No datachunk access violations were found :P.");
 		Ok(())
 	}
 
 	pub fn check(unchecked: &UnloadedComposition) -> Result<Checked, Arc<dyn Error>> {
+		info!("Commencing check of unloaded composition.");
 		Self::cross_access_check(unchecked)?;
 		Self::ancestor_check(unchecked)?;
+		info!("Unloaded composition is valid, check completed.");
 		Ok(Checked { a: () })
 	}
 
 	pub fn run(&self) -> InstanceControlFlow {
+		info!("Generating thread pool.");
 		let pool = ThreadPool::new(8); //TODO: make thread count and maybe other attributes configurable
+		info!("Generated thread pool.");
 
 		for chain in &*self.fulfiller_chains {
 			chain.clone().attempt_to_run(self.task_completion.clone(), pool.clone(), self.fulfiller_chains.clone(), self.control_flow.clone());
 		}
 
-		println!("main thread wait");
+		info!("Waiting for tasks to complete.");
 
 		self.task_completion.main_thread_wait();
-		println!("tasks completed");
+		info!("Tasks completed.");
 
+		info!("Locking control flow.");
 		let control_flow = self.control_flow.lock().clone();
 
+		info!("Exiting run.");
 		control_flow
 	}
 }

@@ -15,6 +15,7 @@
 ///
 #[derive(Debug)]
 pub struct Ready {
+	//TODO: atomic are actually necessary here cuz registers and whatnot
 	//careful auto-implementing traits here. This whole struct is designed to be used in a race condition.
 	state: u64,
 	greatest_prereq: u64,
@@ -43,6 +44,10 @@ impl Ready {
 
 #[cfg(test)]
 mod tests {
+	//TODO: eewwwwww
+
+	use super::Ready;
+
 	use std::{
 		sync::{
 			atomic::{AtomicU32, AtomicUsize, Ordering},
@@ -50,8 +55,6 @@ mod tests {
 		},
 		thread,
 	};
-
-	use super::Ready;
 
 	#[test]
 	fn check_for_deadlocks() -> Result<(), String> {

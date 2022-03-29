@@ -35,9 +35,8 @@ impl LoadedTask {
 		let user_data = user_library.load_task(unloaded_task.type_name.as_str(), deserialize_str.as_str())?;
 
 		let closure = {
-			let task_impl = user_data.task_impl.lock();
-			let task_data = user_data.task_data.lock();
-			task_impl.run(&*task_data, name.clone())
+			let mut task_impl = user_data.inner.lock();
+			task_impl.run(name.clone())
 		};
 
 		let ret = Ok(Self { name, accesses, closure, user_data });

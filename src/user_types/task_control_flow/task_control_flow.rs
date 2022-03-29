@@ -1,6 +1,6 @@
-use std::{collections::BTreeSet, error::Error, rc::Rc, sync::Arc};
-
 use crate::identify::crate_name::CrateName;
+
+use std::{collections::BTreeSet, error::Error, rc::Rc, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub enum TaskControlFlow {

@@ -3,7 +3,7 @@ use crate::{
 		loaded::{loaded_datachunk::LoadedDatachunk, loaded_task::LoadedTask},
 		unloaded::unloaded_crate::UnloadedCrate,
 	},
-	concurrency::{fulfiller::Fulfiller, possibly_poisoned_mutex::PossiblyPoisonedMutex, ready::Ready},
+	concurrency::{fulfiller::Fulfiller, ready::Ready},
 	dylib_management::safe_library::{
 		safe_library::{DebugMode, LibraryRecompile, SafeLibrary},
 		user_library::UserLibrary,
@@ -53,8 +53,6 @@ impl LoadedCrate {
 				}
 			});
 		}
-
-		println!("{:#?}", datachunks);
 
 		let mut fulfillers = BTreeMap::new();
 

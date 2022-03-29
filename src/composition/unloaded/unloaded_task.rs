@@ -1,6 +1,6 @@
-use serde::Deserialize;
-
 use crate::{concurrency::access::Access, identify::task_name::FullTaskName};
+
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct UnloadedTask {

@@ -1,6 +1,6 @@
-use std::fmt::{Debug, Formatter};
-
 use serde::Deserialize;
+
+use std::fmt::{Debug, Formatter};
 
 #[derive(Deserialize, PartialEq)]
 pub struct UnloadedDatachunk {

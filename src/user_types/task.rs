@@ -8,20 +8,17 @@ use std::{
 };
 
 pub type TaskClosureOutput = TaskControlFlow;
-pub type TaskClosureType = Box<TaskClosureTrait<dyn TaskData>>;
+pub type TaskClosureType = Box<TaskClosureTrait<dyn Taskable>>;
 
 pub type TaskClosureTrait<T> = Mutex<dyn Fn(Arc<PossiblyPoisonedMutex<T>>) -> TaskClosureOutput + Send>;
 
-pub trait TaskData: Debug + mopa::Any + Send {}
-mopafy!(TaskData);
-
-pub trait TaskImpl: Debug + Send {
-	fn run(&self, task_data: &dyn TaskData, task_name: FullTaskName) -> TaskClosureType;
-	fn handle_control_flow_update(&self, task_data: &dyn TaskData, this_task_name: &FullTaskName, other_task_name: &FullTaskName, control_flow: &TaskControlFlow) -> bool;
+pub trait Taskable: Debug + Send + mopa::Any {
+	fn run(&mut self, this_task_name: FullTaskName) -> TaskClosureType;
+	fn handle_control_flow_update(&mut self, this_task_name: &FullTaskName, other_task_name: &FullTaskName, control_flow: &TaskControlFlow) -> bool;
 }
+mopafy!(Taskable);
 
 #[derive(Clone, Debug)]
 pub struct Task {
-	pub task_data: Arc<PossiblyPoisonedMutex<dyn TaskData>>,
-	pub task_impl: Arc<PossiblyPoisonedMutex<dyn TaskImpl>>,
+	pub inner: Arc<PossiblyPoisonedMutex<dyn Taskable>>,
 }

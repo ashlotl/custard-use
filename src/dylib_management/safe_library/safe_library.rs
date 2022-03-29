@@ -4,6 +4,7 @@ use crate::{
 };
 
 use libloading::Library;
+use log::info;
 
 use std::{cell::RefCell, collections::BTreeMap, error::Error, fmt, fs, path::Path, rc::Rc};
 
@@ -83,8 +84,9 @@ pub fn load_crate_as_library(name: CrateName, recompile: LibraryRecompile, debug
 		fs::copy(old_path, &path)?;
 	}
 
-	println!("A");
-	let ret = Ok(unsafe { libloading::Library::new(path) }?);
-	println!("B");
+	info!("Instantiating new library: {}", path);
+	let ret = Ok(unsafe { libloading::Library::new(path.clone()) }?);
+	info!("Instantiated library: {}", path);
+
 	ret
 }

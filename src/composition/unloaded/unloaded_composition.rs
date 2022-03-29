@@ -8,7 +8,7 @@ use crate::{
 	identify::{crate_name::CrateName, task_name::FullTaskName},
 };
 
-use ron::{self};
+use ron;
 use serde::Deserialize;
 
 use std::{
@@ -148,7 +148,6 @@ impl UnloadedComposition {
 	}
 
 	fn from_crate(crate_name: CrateName, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
-		println!("A");
 		let loaded = Rc::new(CoreLibrary::new(crate_name, recompile, debug, drop_list)?);
 		let composition_string = ((loaded.symbols.as_ref().unwrap().composition)()).into_rust()?;
 		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(composition_string.as_str());

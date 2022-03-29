@@ -1,12 +1,3 @@
-use std::{
-	cell::RefCell,
-	panic::{self, AssertUnwindSafe},
-	rc::Rc,
-	sync::{Arc, Barrier, BarrierWaitResult, Mutex, Weak},
-};
-
-use threadpool::ThreadPool;
-
 use crate::{
 	composition::loaded::loaded_task::LoadedTask,
 	concurrency::{fulfiller_chain::FulfillerChain, possibly_poisoned_mutex::PossiblyPoisonedMutex, ready::Ready},
@@ -14,6 +5,16 @@ use crate::{
 	identify::task_name::FullTaskName,
 	instance_control_flow::InstanceControlFlow,
 	user_types::task_control_flow::task_control_flow::TaskControlFlow,
+};
+
+use log::{error, info, warn};
+use threadpool::ThreadPool;
+
+use std::{
+	cell::RefCell,
+	panic::{self, AssertUnwindSafe},
+	rc::Rc,
+	sync::{Arc, Barrier, BarrierWaitResult, Mutex, Weak},
 };
 
 #[derive(Debug)]
@@ -29,8 +30,9 @@ impl Quit {
 		Self { nominal_count: Mutex::new(active_count), active_count: Mutex::new(active_count), barrier: Barrier::new(2) }
 	}
 
-	pub(crate) fn begin_fulfiller(&self) {
-		*self.active_count.lock().unwrap() += 1;
+	pub(crate) fn begin_fulfillers(&self, num_to_add: isize) {
+		let mut active_g = self.active_count.lock().unwrap();
+		*active_g = ((*active_g as isize) + num_to_add) as usize;
 	}
 
 	pub(crate) fn cease_fulfiller(&self, fulfiller: &Fulfiller) {
@@ -39,10 +41,10 @@ impl Quit {
 		let mut active_count = self.active_count.lock().unwrap();
 
 		*active_count -= 1;
-		println!("new active count: {}", *active_count);
+		info!("New count of active fulfillers: {}", *active_count);
 		if *active_count == 0 {
 			std::mem::drop(active_count);
-			println!("other thread wait");
+			info!("Waiting for main thread to quit.");
 			self.barrier.wait(); //return to this call in CustardInstance //TODO: make sure this doesnt get called twice and set off a deadlock
 		}
 	}
@@ -52,7 +54,7 @@ impl Quit {
 	}
 
 	pub(crate) unsafe fn reset(&self) -> usize {
-		println!("quit reset occurs");
+		info!("Resetting active/nominal counts and barrier for reload");
 		let nominal_count = *self.nominal_count.lock().unwrap();
 		*self.active_count.lock().unwrap() = nominal_count;
 		*((&self.barrier as *const _) as *mut Barrier) = Barrier::new(2);
@@ -99,17 +101,19 @@ impl Fulfiller {
 				}
 
 				let error_or_stop = || {
+					if current_task_name == &fulfiller.task.as_ref().unwrap().name {
+						return true;
+					}
 					let user_task = fulfiller.task.as_ref().unwrap().user_data.clone();
-					let task_impl = user_task.task_impl.lock();
-					let user_data = user_task.task_data.lock();
-					task_impl.handle_control_flow_update(&*user_data, current_task_name, &fulfiller.task.as_ref().unwrap().name, task_result)
+					let mut task_impl = user_task.inner.lock();
+					task_impl.handle_control_flow_update(current_task_name, &fulfiller.task.as_ref().unwrap().name, task_result)
 				};
 
 				let cease = match task_result {
 					TaskControlFlow::Continue => unreachable!(),
 					TaskControlFlow::Err(error) => match error.downcast_ref::<CustardTaskPanicError>() {
 						Some(_) => {
-							println!("exiting because a task panicked: {:?}", fulfiller.task.as_ref().unwrap().name);
+							warn!("Exiting because a task panicked: {:?}", fulfiller.task.as_ref().unwrap().name);
 							true
 						}
 						None => error_or_stop(),
@@ -119,7 +123,7 @@ impl Fulfiller {
 				};
 				if cease {
 					quit.cease_fulfiller(&fulfiller);
-					println!("ceased fulfiller");
+					info!("Fulfiller ceased: {:?}", fulfiller.task.as_ref().unwrap().name);
 				}
 			}
 		}
@@ -134,16 +138,12 @@ impl Fulfiller {
 		let cease = { *self.cease.lock().unwrap() };
 
 		if !cease {
-			println!("not cease");
-		}
-
-		if !cease {
 			let closure_result: TaskControlFlow;
 			let safe_closure_result = AssertUnwindSafe(RefCell::new(Some(TaskControlFlow::Continue)));
 			let safe_self = AssertUnwindSafe(self);
 			let panic_result = panic::catch_unwind(|| {
 				let user_task = &safe_self.task;
-				*safe_closure_result.borrow_mut() = Some((user_task.as_ref().unwrap().closure.lock().unwrap())(user_task.as_ref().unwrap().user_data.task_data.clone()));
+				*safe_closure_result.borrow_mut() = Some((user_task.as_ref().unwrap().closure.lock().unwrap())(user_task.as_ref().unwrap().user_data.inner.clone()));
 			});
 
 			match panic_result {
@@ -167,7 +167,7 @@ impl Fulfiller {
 						TaskControlFlow::Err(e) => {
 							*self.error.lock().unwrap() = true;
 							*quit.nominal_count.lock().unwrap() -= 1;
-							println!("task error: {}", e)
+							error!("Task error: {}", e);
 						}
 						TaskControlFlow::StopAll => *instance_control_flow.lock() = InstanceControlFlow::Stop,
 						_ => {}

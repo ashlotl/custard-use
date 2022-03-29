@@ -1,5 +1,7 @@
 use std::{cell::RefCell, error::Error, rc::Rc};
 
+use log::info;
+
 use crate::{
 	dylib_management::safe_library::{
 		load_types::FFIResult,
@@ -56,15 +58,24 @@ impl<'lib> SafeLibrary for CoreLibrary<'lib> {
 
 		unsafe {
 			let lib = &*(ret.lib.as_ref().unwrap() as *const libloading::Library);
-			println!("unsafe heresy");
+
+			info!("Loading library symbols.");
+
+			info!("Getting composition getter.");
 			let composition = lib.get(b"__custard_composition__")?;
-			println!("got composition");
+			info!("Got composition getter.");
+
+			info!("Getting unloaded datachunk getter.");
 			let unloaded_datachunk_contents = lib.get(b"__custard_unloaded_datachunk_contents__")?;
-			println!("got unloaded_datachunks");
+			info!("Got unloaded datachunk getter.");
+
+			info!("Getting unloaded task getter.");
 			let unloaded_task_contents = lib.get(b"__custard_unloaded_task_contents__")?;
-			println!("got unloaded_tasks");
+			info!("Got unloaded task getter.");
+
 			ret.symbols = Some(CoreLibrarySymbols { composition, unloaded_datachunk_contents, unloaded_task_contents });
-			println!("done");
+
+			info!("Loaded library symbols.");
 			Ok(ret)
 		}
 	}

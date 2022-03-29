@@ -41,7 +41,7 @@ mod tests {
 		identify::task_name::FullTaskName,
 		user_types::{
 			datachunk::Datachunk,
-			task::{Task, TaskClosureType, TaskData, TaskImpl},
+			task::{Task, TaskClosureType, Taskable},
 			task_control_flow::task_control_flow::TaskControlFlow,
 		},
 	};
@@ -73,14 +73,11 @@ mod tests {
 	#[derive(Debug, Deserialize)]
 	pub struct TestTask();
 
-	#[derive(Debug)]
-	pub struct TestTaskImpl();
-
-	impl TaskImpl for TestTaskImpl {
-		fn run(&self, _: &dyn TaskData, _: FullTaskName) -> TaskClosureType {
+	impl Taskable for TestTask {
+		fn run(&mut self, _: FullTaskName) -> TaskClosureType {
 			unimplemented!();
 		}
-		fn handle_control_flow_update(&self, _: &dyn TaskData, _: &FullTaskName, _: &FullTaskName, _: &TaskControlFlow) -> bool {
+		fn handle_control_flow_update(&mut self, _: &FullTaskName, _: &FullTaskName, _: &TaskControlFlow) -> bool {
 			unimplemented!();
 		}
 	}
