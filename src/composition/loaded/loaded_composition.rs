@@ -19,6 +19,7 @@ use crate::{
 		task_name::{FullTaskName, TaskName},
 	},
 	instance_control_flow::InstanceControlFlow,
+	utils::mutable_arc::MutableArc,
 };
 
 use log::info;
@@ -39,7 +40,7 @@ pub struct Checked {
 
 #[derive(Debug)]
 pub struct LoadedComposition {
-	pub(crate) crates: BTreeMap<CrateName, LoadedCrate>,
+	pub(crate) crates: MutableArc<BTreeMap<CrateName, LoadedCrate>>,
 	pub(crate) fulfiller_chains: Arc<Vec<Arc<FulfillerChain>>>,
 	pub(crate) task_completion: Arc<Quit>,
 	pub(crate) control_flow: Arc<PossiblyPoisonedMutex<InstanceControlFlow>>,
@@ -57,8 +58,11 @@ impl LoadedComposition {
 				task_count += 1;
 			}
 		}
+
+		let crate_table = MutableArc::new(Arc::new(BTreeMap::new()));
+
 		let mut ret = Self {
-			crates: BTreeMap::new(),
+			crates: crate_table.clone(),
 			fulfiller_chains: Arc::new(vec![]),
 			task_completion: match quit {
 				Some(v) => v,
@@ -72,12 +76,22 @@ impl LoadedComposition {
 				info!("Matched crate {:?} to old crate, reusing.", crate_name);
 			}
 			let loaded_crate_contents = LoadedCrate::new(crate_name, unloaded_crate_contents, recompile.clone(), debug.clone(), drop_list.clone(), old_crate)?;
-			ret.crates.insert(crate_name.clone(), loaded_crate_contents);
+			unsafe {
+				ret.crates.get_mut().insert(crate_name.clone(), loaded_crate_contents);
+			}
 		}
 
 		ret.connect_fulfillers(composition)?;
 		ret.create_fulfiller_chains(composition)?;
 		ret.attach_fulfiller_chains()?;
+
+		for (_crate_name, crate_contents) in ret.crates.get() {
+			for (_task_name, task_contents) in &crate_contents.tasks {
+				unsafe {
+					(&mut *(task_contents.task.as_ref().unwrap() as *const LoadedTask as *mut LoadedTask)).load_closure(crate_table.clone())?;
+				}
+			}
+		}
 
 		Ok(ret)
 	}
@@ -85,7 +99,7 @@ impl LoadedComposition {
 	pub fn attach_fulfiller_chains(&mut self) -> Result<(), Box<dyn Error>> {
 		info!("Attaching fulfiller chains to fulfillers.");
 		for chain in &*self.fulfiller_chains {
-			let first_node = self.crates.get(&chain.first_name.crate_name).unwrap().tasks.get(&chain.first_name.task_name).unwrap();
+			let first_node = self.crates.get().get(&chain.first_name.crate_name).unwrap().tasks.get(&chain.first_name.task_name).unwrap();
 			for prerequisite in &first_node.prerequisites {
 				let unsafe_borrow = unsafe { &mut *(&prerequisite.upgrade().unwrap().children_chains as *const _ as *mut Vec<Weak<FulfillerChain>>) };
 				unsafe_borrow.push(Arc::downgrade(chain));
@@ -135,7 +149,7 @@ impl LoadedComposition {
 	fn connect_fulfillers(&mut self, composition: &UnloadedComposition) -> Result<(), Box<dyn Error>> {
 		info!("Connecting fulfiller shared references.");
 		for (crate_name, unloaded_crate) in &composition.crates {
-			let loaded_crate = match self.crates.get(crate_name) {
+			let loaded_crate = match self.crates.get().get(crate_name) {
 				Some(v) => v,
 				None => unreachable!(),
 			};
@@ -149,7 +163,7 @@ impl LoadedComposition {
 					.parents
 					.iter()
 					.map(|parent_name| {
-						let loaded_parent_crate = match self.crates.get(&parent_name.crate_name) {
+						let loaded_parent_crate = match self.crates.get().get(&parent_name.crate_name) {
 							Some(v) => v,
 							None => unreachable!(),
 						};
@@ -190,7 +204,7 @@ impl LoadedComposition {
 				}
 				traversed.insert(last_node.clone());
 				let last_node_contents = composition.crates.get(&last_node.crate_name).unwrap().tasks.get(&last_node.task_name).unwrap();
-				chain.push(Arc::downgrade(self.crates.get(&last_node.crate_name).unwrap().tasks.get(&last_node.task_name).unwrap()));
+				chain.push(Arc::downgrade(self.crates.get().get(&last_node.crate_name).unwrap().tasks.get(&last_node.task_name).unwrap()));
 				chain_names.push(last_node);
 
 				if last_node_contents.parents.len() > 1 {

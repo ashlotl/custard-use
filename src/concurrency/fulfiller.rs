@@ -45,7 +45,7 @@ impl Quit {
 		if *active_count == 0 {
 			std::mem::drop(active_count);
 			info!("Waiting for main thread to quit.");
-			self.barrier.wait(); //return to this call in CustardInstance //TODO: make sure this doesnt get called twice and set off a deadlock
+			self.barrier.wait(); //return to this call in CustardInstance. Make sure this doesnt get called twice and set off a deadlock
 		}
 	}
 
@@ -105,7 +105,7 @@ impl Fulfiller {
 						return true;
 					}
 					let user_task = fulfiller.task.as_ref().unwrap().user_data.clone();
-					let mut task_impl = user_task.inner.lock();
+					let mut task_impl = user_task.lock();
 					task_impl.handle_control_flow_update(current_task_name, &fulfiller.task.as_ref().unwrap().name, task_result)
 				};
 
@@ -143,7 +143,7 @@ impl Fulfiller {
 			let safe_self = AssertUnwindSafe(self);
 			let panic_result = panic::catch_unwind(|| {
 				let user_task = &safe_self.task;
-				*safe_closure_result.borrow_mut() = Some((user_task.as_ref().unwrap().closure.lock().unwrap())(user_task.as_ref().unwrap().user_data.inner.clone()));
+				*safe_closure_result.borrow_mut() = Some((user_task.as_ref().unwrap().closure.as_ref().unwrap().lock().unwrap())(user_task.as_ref().unwrap().user_data.clone()));
 			});
 
 			match panic_result {
@@ -163,7 +163,7 @@ impl Fulfiller {
 				_ => {
 					match &closure_result {
 						TaskControlFlow::FullReload => *instance_control_flow.lock() = InstanceControlFlow::FullReload,
-						TaskControlFlow::PartialReload(v) => *instance_control_flow.lock() = InstanceControlFlow::PartialReload(v.clone()), //TODO: specify crates to reload
+						TaskControlFlow::PartialReload(v) => *instance_control_flow.lock() = InstanceControlFlow::PartialReload(v.clone()),
 						TaskControlFlow::Err(e) => {
 							*self.error.lock().unwrap() = true;
 							*quit.nominal_count.lock().unwrap() -= 1;

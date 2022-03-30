@@ -8,6 +8,10 @@ pub struct CrateName {
 }
 
 impl CustardName<'_> for CrateName {
+	fn new(val: String) -> Self {
+		Self { name: val }
+	}
+
 	fn get(&self) -> &str {
 		self.name.as_str()
 	}

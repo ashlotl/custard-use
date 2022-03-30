@@ -1,9 +1,9 @@
 use std::error::Error;
 
-use crate::user_types::{datachunk::Datachunk, task::Task};
+use crate::user_types::{datachunk::DatachunkObject, task::TaskObject};
 
-pub type DatachunkLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<Box<dyn Datachunk>, Box<dyn Error>>>;
-pub type TaskLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<Task, Box<dyn Error + Send + Sync>>>;
+pub type DatachunkLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<DatachunkObject, Box<dyn Error>>>;
+pub type TaskLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<TaskObject, Box<dyn Error + Send + Sync>>>;
 
 #[repr(C)]
 #[derive(Clone)]
@@ -31,17 +31,18 @@ impl<T, E> FFIResult<T, E> {
 #[cfg(test)]
 mod tests {
 
-	use std::error::Error;
+	use std::{error::Error, sync::Arc};
 
 	//make sure no non-FFI-safe types are in use
 	use serde::Deserialize;
 
 	use crate::{
+		composition::loaded::datachunk_getter::DatachunkGetter,
 		dylib_management::safe_library::load_types::{DatachunkLoadFn, FFIResult, TaskLoadFn},
 		identify::task_name::FullTaskName,
 		user_types::{
-			datachunk::Datachunk,
-			task::{Task, TaskClosureType, Taskable},
+			datachunk::{DatachunkObject, Datachunkable},
+			task::{TaskClosureType, TaskObject, Taskable},
 			task_control_flow::task_control_flow::TaskControlFlow,
 		},
 	};
@@ -49,22 +50,13 @@ mod tests {
 	#[derive(Debug, Deserialize)]
 	pub struct TestDatachunk();
 
-	impl Datachunk for TestDatachunk {}
+	impl Datachunkable for TestDatachunk {}
 
 	#[no_mangle]
 	#[allow(non_snake_case)]
 	#[deny(improper_ctypes_definitions)]
-	pub extern "C" fn datachunk_load_fn_test(from: Box<String>) -> Box<FFIResult<Box<dyn Datachunk>, Box<dyn Error>>> {
-		let created: Result<TestDatachunk, ron::Error> = ron::from_str(from.as_str());
-
-		match created {
-			Ok(v) => {
-				return Box::new(FFIResult::Ok(Box::new(v)));
-			}
-			Err(e) => {
-				return Box::new(FFIResult::Err(Box::new(e)));
-			}
-		}
+	pub extern "C" fn datachunk_load_fn_test(_: Box<String>) -> Box<FFIResult<DatachunkObject, Box<dyn Error>>> {
+		unimplemented!()
 	}
 
 	#[allow(unused)]
@@ -74,7 +66,7 @@ mod tests {
 	pub struct TestTask();
 
 	impl Taskable for TestTask {
-		fn run(&mut self, _: FullTaskName) -> TaskClosureType {
+		fn run(&mut self, _: FullTaskName, _: Arc<DatachunkGetter>) -> TaskClosureType {
 			unimplemented!();
 		}
 		fn handle_control_flow_update(&mut self, _: &FullTaskName, _: &FullTaskName, _: &TaskControlFlow) -> bool {
@@ -85,7 +77,7 @@ mod tests {
 	#[no_mangle]
 	#[allow(non_snake_case)]
 	#[deny(improper_ctypes_definitions)]
-	pub extern "C" fn task_load_fn_test(_from: Box<String>) -> Box<FFIResult<Task, Box<dyn Error + Send + Sync>>> {
+	pub extern "C" fn task_load_fn_test(_from: Box<String>) -> Box<FFIResult<TaskObject, Box<dyn Error + Send + Sync>>> {
 		unimplemented!()
 	}
 

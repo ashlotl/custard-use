@@ -2,5 +2,9 @@ use mopa::mopafy;
 
 use std::fmt::Debug;
 
-pub trait Datachunk: Debug + mopa::Any + Send + Sync {}
-mopafy!(Datachunk);
+use crate::utils::mutable_arc::MutableArc;
+
+pub type DatachunkObject = MutableArc<dyn Datachunkable>;
+
+pub trait Datachunkable: Debug + mopa::Any + Send + Sync {}
+mopafy!(Datachunkable);

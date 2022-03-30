@@ -1,5 +1,6 @@
 #![feature(arbitrary_self_types)]
 #![feature(path_try_exists)]
+#![feature(try_trait_v2)]
 
 pub mod composition;
 pub mod concurrency;

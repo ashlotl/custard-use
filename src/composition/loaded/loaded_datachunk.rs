@@ -1,14 +1,14 @@
 use crate::{
 	composition::unloaded::unloaded_datachunk::UnloadedDatachunk,
 	dylib_management::safe_library::{core_library::CoreLibrary, user_library::UserLibrary},
-	user_types::datachunk::Datachunk,
+	user_types::datachunk::DatachunkObject,
 };
 
 use std::error::Error;
 
 #[derive(Debug)]
 pub struct LoadedDatachunk {
-	user_data: Box<dyn Datachunk>,
+	pub(crate) user_data: DatachunkObject,
 }
 
 impl LoadedDatachunk {

@@ -2,7 +2,10 @@ use log::{debug, error, info};
 
 use crate::{
 	composition::{
-		loaded::loaded_composition::{Checked, LoadedComposition},
+		loaded::{
+			loaded_composition::{Checked, LoadedComposition},
+			loaded_datachunk::LoadedDatachunk,
+		},
 		unloaded::unloaded_composition::UnloadedComposition,
 	},
 	concurrency::{
@@ -10,7 +13,7 @@ use crate::{
 		possibly_poisoned_mutex::PossiblyPoisonedMutex,
 	},
 	dylib_management::safe_library::safe_library::{DebugMode, LibraryRecompile},
-	identify::crate_name::CrateName,
+	identify::{crate_name::CrateName, datachunk_name::DatachunkName},
 	instance_control_flow::InstanceControlFlow,
 };
 
@@ -82,7 +85,8 @@ impl CustardInstance {
 		let old_composition = self.loaded_composition.take().unwrap();
 		let mut old_crates = BTreeMap::new();
 
-		for (crate_name, old_crate) in old_composition.crates {
+		for (crate_name, old_crate) in unsafe { old_composition.crates.get_mut() } {
+			let crate_name = crate_name.clone();
 			let reload = reload_for_sure.contains(&crate_name);
 			let old_unloaded_crate = self.unloaded_composition.crates.get(&crate_name);
 			let new_unloaded_crate = new_unloaded_composition.crates.get(&crate_name);
@@ -93,7 +97,8 @@ impl CustardInstance {
 			}
 			let mut old_tasks = BTreeMap::new();
 
-			for (task_name, old_fulfiller) in old_crate.tasks {
+			for (task_name, old_fulfiller) in &old_crate.tasks {
+				let task_name = task_name.clone();
 				let mut_fulfiller = unsafe { &mut *(Arc::as_ptr(&old_fulfiller) as *mut Fulfiller) };
 				let old_task = mut_fulfiller.task.take().unwrap();
 				old_tasks.insert(task_name, old_task);
@@ -101,8 +106,9 @@ impl CustardInstance {
 
 			let mut old_datachunks = BTreeMap::new();
 
-			for (datachunk_name, old_datachunk) in old_crate.datachunks {
-				old_datachunks.insert(datachunk_name, old_datachunk.unwrap());
+			for (datachunk_name, old_datachunk) in unsafe { &mut *(&old_crate.datachunks as *const _ as *mut BTreeMap<DatachunkName, Option<LoadedDatachunk>>) } {
+				let datachunk_name = datachunk_name.clone();
+				old_datachunks.insert(datachunk_name, old_datachunk.take().unwrap());
 			}
 
 			old_crates.insert(crate_name, (old_tasks, old_datachunks));
