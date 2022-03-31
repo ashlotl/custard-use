@@ -1,6 +1,6 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 /// Keeps track of whether an `OCTask`'s `Fulfiller` has a completed prerequisite (parent).
-///
-/// In order to keep track of whether something is ready, we *do not* use atomics. Instead we just keep track of progress with a moving iterator.
 ///
 /// The pattern is as follows:
 ///
@@ -15,36 +15,38 @@
 ///
 #[derive(Debug)]
 pub struct Ready {
-	//TODO: atomic are actually necessary here cuz registers and whatnot
-	//careful auto-implementing traits here. This whole struct is designed to be used in a race condition.
-	state: u64,
-	greatest_prereq: u64,
+	//TODO: atomic orderings and general implementation could be made slightly faster; test this on performance mode
+	state: AtomicU64,
+	greatest_prereq: AtomicU64,
 	entrypoint: bool,
 }
 
 impl Ready {
 	pub(crate) fn new(entrypoint: bool) -> Self {
-		Self { state: 0, greatest_prereq: 0, entrypoint }
+		Self { state: AtomicU64::new(0), greatest_prereq: AtomicU64::new(0), entrypoint }
 	}
 
 	pub(crate) fn release(&self) {
-		unsafe {
-			(*(self as *const Self as *mut Self)).state = self.greatest_prereq + 1;
-		}
+		self.state.store(self.greatest_prereq.load(Ordering::SeqCst) + 1, Ordering::SeqCst);
 	}
 
 	pub(crate) fn load_prerequisite(&self, other: &Self) -> bool {
-		let ostate = other.state;
-		unsafe {
-			(*(self as *const Self as *mut Self)).greatest_prereq = ostate.max(self.greatest_prereq);
+		let ostate = other.state.load(Ordering::SeqCst);
+		let greatest_prereq = self.greatest_prereq.load(Ordering::SeqCst);
+		let state = self.state.load(Ordering::SeqCst);
+
+		if ostate > greatest_prereq {
+			self.greatest_prereq.store(ostate, Ordering::SeqCst);
 		}
-		ostate > self.state || self.entrypoint && self.state == 0 || other as *const Self == self as *const Self
+
+		ostate > state || self.entrypoint && state == 0 || other as *const Self == self as *const Self
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	//TODO: eewwwwww
+	//TODO: eewwwwww, these tests are not concise
+	//TODO: loom?
 
 	use super::Ready;
 
