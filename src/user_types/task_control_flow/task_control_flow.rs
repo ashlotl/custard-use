@@ -11,3 +11,9 @@ pub enum TaskControlFlow {
 	StopAll,
 	StopThis,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TaskHandlerState {
+	Continue,
+	Stop,
+}

@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 ///
 #[derive(Debug)]
 pub struct Ready {
-	//TODO: atomic orderings and general implementation could be made slightly faster; test this on performance mode
+	//TODO: atomic orderings and general implementation could be made slightly faster; test this on release mode
 	state: AtomicU64,
 	greatest_prereq: AtomicU64,
 	entrypoint: bool,
@@ -23,11 +23,18 @@ pub struct Ready {
 
 impl Ready {
 	pub(crate) fn new(entrypoint: bool) -> Self {
-		Self { state: AtomicU64::new(0), greatest_prereq: AtomicU64::new(0), entrypoint }
+		Self {
+			state: AtomicU64::new(0),
+			greatest_prereq: AtomicU64::new(0),
+			entrypoint,
+		}
 	}
 
 	pub(crate) fn release(&self) {
-		self.state.store(self.greatest_prereq.load(Ordering::SeqCst) + 1, Ordering::SeqCst);
+		self.state.store(
+			self.greatest_prereq.load(Ordering::SeqCst) + 1,
+			Ordering::SeqCst,
+		);
 	}
 
 	pub(crate) fn load_prerequisite(&self, other: &Self) -> bool {
@@ -39,7 +46,9 @@ impl Ready {
 			self.greatest_prereq.store(ostate, Ordering::SeqCst);
 		}
 
-		ostate > state || self.entrypoint && state == 0 || other as *const Self == self as *const Self
+		ostate > state
+			|| self.entrypoint && state == 0
+			|| other as *const Self == self as *const Self
 	}
 }
 
@@ -67,24 +76,30 @@ mod tests {
 
 		let count = Arc::new(AtomicUsize::new(0));
 
-		let readys: Arc<Vec<Ready>> = Arc::new((0..LOOP_SIZE).map(|i| Ready::new(i == 0)).collect());
+		let readys: Arc<Vec<Ready>> =
+			Arc::new((0..LOOP_SIZE).map(|i| Ready::new(i == 0)).collect());
 
 		for i in 0..LOOP_SIZE {
 			let count = count.clone();
 			let readys = readys.clone();
-			joins.push(thread::spawn(move || loop {
+			joins.push(thread::spawn(move || {
 				loop {
-					//wait via somewhat gross spinning technique
-					if readys[i].load_prerequisite(&readys[((i as i32 - 1 + readys.len() as i32) as usize % readys.len())]) {
-						break;
+					loop {
+						//wait via somewhat gross spinning technique
+						if readys[i].load_prerequisite(
+							&readys[((i as i32 - 1 + readys.len() as i32)
+								as usize % readys.len())],
+						) {
+							break;
+						}
+						thread::yield_now();
 					}
-					thread::yield_now();
-				}
 
-				readys[i].release(); // let other nodes run
+					readys[i].release(); // let other nodes run
 
-				if count.fetch_add(1, Ordering::Relaxed) >= STOP_AT + 1 {
-					return;
+					if count.fetch_add(1, Ordering::Relaxed) >= STOP_AT + 1 {
+						return;
+					}
 				}
 			}));
 		}
@@ -127,11 +142,16 @@ mod tests {
 				joins.push(thread::spawn(move || {
 					let prerequisites: Vec<&Ready> = (0..SPLITS_PER)
 						.map(|k| {
-							let other_i = ((i as i32 - 1 + readys.len() as i32) % readys.len() as i32) as usize;
+							let other_i = ((i as i32 - 1 + readys.len() as i32)
+								% readys.len() as i32) as usize;
 							let layer = &readys[other_i];
-							let other_j = (j as u32 * SPLITS_PER + k) as usize % layer.len();
+							let other_j = (j as u32 * SPLITS_PER + k) as usize
+								% layer.len();
 							if layer.len() != SPLITS_PER as usize {
-								assert_eq!(layer.len() / SPLITS_PER as usize, readys[i].len());
+								assert_eq!(
+									layer.len() / SPLITS_PER as usize,
+									readys[i].len()
+								);
 							}
 							&layer[other_j]
 						})
@@ -148,7 +168,9 @@ mod tests {
 					}
 
 					unsafe {
-						(*((&*record) as *const Vec<(i32, i32)> as *mut Vec<(i32, i32)>))[count.fetch_add(1, Ordering::Relaxed) as usize] = (i as i32, j as i32);
+						(*((&*record) as *const Vec<(i32, i32)>
+							as *mut Vec<(i32, i32)>))
+							[count.fetch_add(1, Ordering::Relaxed) as usize] = (i as i32, j as i32);
 					} //keep track of the order in which things were executed
 
 					readys[i][j].release(); //release for next nodes
@@ -165,14 +187,23 @@ mod tests {
 		Ok(())
 	}
 
-	fn check_records(record: &Vec<(i32, i32)>, splits_per: usize) -> Result<(), String> {
+	fn check_records(
+		record: &Vec<(i32, i32)>,
+		splits_per: usize,
+	) -> Result<(), String> {
 		for i in 0..record.len() {
 			if record[i].0 == 0 {
 				continue;
 			}
 			for j in 0..splits_per {
-				if !record[0..i].contains(&(record[i].0 - 1, record[i].1 * splits_per as i32 + j as i32)) {
-					return Err(format!("Ordering failed: {:?} has no ancestor", record[i]));
+				if !record[0..i].contains(&(
+					record[i].0 - 1,
+					record[i].1 * splits_per as i32 + j as i32,
+				)) {
+					return Err(format!(
+						"Ordering failed: {:?} has no ancestor",
+						record[i]
+					));
 				}
 			}
 		}

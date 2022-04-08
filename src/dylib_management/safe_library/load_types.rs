@@ -2,8 +2,14 @@ use std::error::Error;
 
 use crate::user_types::{datachunk::DatachunkObject, task::TaskObject};
 
-pub type DatachunkLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<DatachunkObject, Box<dyn Error>>>;
-pub type TaskLoadFn = extern "C" fn(Box<String>) -> Box<FFIResult<TaskObject, Box<dyn Error + Send + Sync>>>;
+pub type DatachunkLoadFn =
+	extern "C" fn(
+		Box<String>,
+	) -> Box<FFIResult<DatachunkObject, Box<dyn Error>>>;
+pub type TaskLoadFn =
+	extern "C" fn(
+		Box<String>,
+	) -> Box<FFIResult<TaskObject, Box<dyn Error + Send + Sync>>>;
 
 #[repr(C)]
 #[derive(Clone)]
@@ -38,12 +44,16 @@ mod tests {
 
 	use crate::{
 		composition::loaded::datachunk_getter::DatachunkGetter,
-		dylib_management::safe_library::load_types::{DatachunkLoadFn, FFIResult, TaskLoadFn},
+		dylib_management::safe_library::load_types::{
+			DatachunkLoadFn, FFIResult, TaskLoadFn,
+		},
 		identify::task_name::FullTaskName,
 		user_types::{
 			datachunk::{DatachunkObject, Datachunkable},
 			task::{TaskClosureType, TaskObject, Taskable},
-			task_control_flow::task_control_flow::TaskControlFlow,
+			task_control_flow::task_control_flow::{
+				TaskControlFlow, TaskHandlerState,
+			},
 		},
 	};
 
@@ -55,7 +65,9 @@ mod tests {
 	#[no_mangle]
 	#[allow(non_snake_case)]
 	#[deny(improper_ctypes_definitions)]
-	pub extern "C" fn datachunk_load_fn_test(_: Box<String>) -> Box<FFIResult<DatachunkObject, Box<dyn Error>>> {
+	pub extern "C" fn datachunk_load_fn_test(
+		_: Box<String>,
+	) -> Box<FFIResult<DatachunkObject, Box<dyn Error>>> {
 		unimplemented!()
 	}
 
@@ -66,10 +78,19 @@ mod tests {
 	pub struct TestTask();
 
 	impl Taskable for TestTask {
-		fn run(&mut self, _: FullTaskName, _: Arc<DatachunkGetter>) -> TaskClosureType {
+		fn run(
+			&mut self,
+			_: FullTaskName,
+			_: Arc<DatachunkGetter>,
+		) -> TaskClosureType {
 			unimplemented!();
 		}
-		fn handle_control_flow_update(&mut self, _: &FullTaskName, _: &FullTaskName, _: &TaskControlFlow) -> bool {
+		fn handle_control_flow_update(
+			&mut self,
+			_: &FullTaskName,
+			_: &FullTaskName,
+			_: &TaskControlFlow,
+		) -> TaskHandlerState {
 			unimplemented!();
 		}
 	}
@@ -77,7 +98,9 @@ mod tests {
 	#[no_mangle]
 	#[allow(non_snake_case)]
 	#[deny(improper_ctypes_definitions)]
-	pub extern "C" fn task_load_fn_test(_from: Box<String>) -> Box<FFIResult<TaskObject, Box<dyn Error + Send + Sync>>> {
+	pub extern "C" fn task_load_fn_test(
+		_from: Box<String>,
+	) -> Box<FFIResult<TaskObject, Box<dyn Error + Send + Sync>>> {
 		unimplemented!()
 	}
 

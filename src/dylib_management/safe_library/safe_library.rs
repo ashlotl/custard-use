@@ -6,7 +6,10 @@ use crate::{
 use libloading::Library;
 use log::info;
 
-use std::{cell::RefCell, collections::BTreeMap, error::Error, fmt, fs, path::Path, rc::Rc};
+use std::{
+	cell::RefCell, collections::BTreeMap, error::Error, fmt, fs, path::Path,
+	rc::Rc,
+};
 
 #[derive(Clone)]
 pub enum LibraryRecompile {
@@ -22,7 +25,12 @@ pub enum DebugMode {
 }
 
 pub trait SafeLibrary: fmt::Debug + LibraryDrop {
-	fn new(name: CrateName, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<Library>>>) -> Result<Self, Box<dyn Error>>
+	fn new(
+		name: CrateName,
+		recompile: LibraryRecompile,
+		debug: DebugMode,
+		drop_list: Rc<RefCell<Vec<Library>>>,
+	) -> Result<Self, Box<dyn Error>>
 	where
 		Self: Sized;
 
@@ -61,8 +69,16 @@ pub unsafe fn increment_library_usage(name: CrateName) -> u32 {
 	}
 }
 
-pub fn load_crate_as_library(name: CrateName, recompile: LibraryRecompile, debug: DebugMode) -> Result<libloading::Library, Box<dyn Error>> {
-	let library_name = libloading::library_filename(name.get()).to_str().unwrap().to_owned().replace("-", "_");
+pub fn load_crate_as_library(
+	name: CrateName,
+	recompile: LibraryRecompile,
+	debug: DebugMode,
+) -> Result<libloading::Library, Box<dyn Error>> {
+	let library_name = libloading::library_filename(name.get())
+		.to_str()
+		.unwrap()
+		.to_owned()
+		.replace("-", "_");
 
 	let usage = unsafe { increment_library_usage(name.clone()) };
 

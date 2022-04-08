@@ -20,17 +20,34 @@ pub struct FulfillerChain {
 
 impl FulfillerChain {
 	/// The start at parameter is intended for use with moving threads, such as in the case of a panic.
-	pub(super) fn run(self: &Arc<Self>, quit: Arc<Quit>, pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, instance_control_flow: Arc<PossiblyPoisonedMutex<InstanceControlFlow>>) {
+	pub(super) fn run(
+		self: &Arc<Self>,
+		quit: Arc<Quit>,
+		pool: ThreadPool,
+		all_chains: Arc<Vec<Arc<Self>>>,
+		instance_control_flow: Arc<PossiblyPoisonedMutex<InstanceControlFlow>>,
+	) {
 		for fulfiller_i in 0..self.chain.len() {
 			let fulfiller = match self.chain[fulfiller_i].upgrade() {
 				Some(v) => v,
 				None => return, //program is exiting
 			};
-			fulfiller.run_task(pool.clone(), quit.clone(), all_chains.clone(), instance_control_flow.clone())
+			fulfiller.run_task(
+				pool.clone(),
+				quit.clone(),
+				all_chains.clone(),
+				instance_control_flow.clone(),
+			)
 		}
 	}
 
-	pub(crate) fn attempt_to_run(self: Arc<Self>, quit: Arc<Quit>, pool: ThreadPool, all_chains: Arc<Vec<Arc<Self>>>, instance_control_flow: Arc<PossiblyPoisonedMutex<InstanceControlFlow>>) {
+	pub(crate) fn attempt_to_run(
+		self: Arc<Self>,
+		quit: Arc<Quit>,
+		pool: ThreadPool,
+		all_chains: Arc<Vec<Arc<Self>>>,
+		instance_control_flow: Arc<PossiblyPoisonedMutex<InstanceControlFlow>>,
+	) {
 		let first_fulfiller = {
 			match self.chain[0].upgrade() {
 				Some(v) => v,
@@ -44,7 +61,12 @@ impl FulfillerChain {
 		if first_fulfiller.prerequisites_complete() {
 			let pool_inner = pool.clone();
 			pool.execute(move || {
-				self.clone().run(quit.clone(), pool_inner, all_chains, instance_control_flow);
+				self.clone().run(
+					quit.clone(),
+					pool_inner,
+					all_chains,
+					instance_control_flow,
+				);
 			});
 		}
 	}

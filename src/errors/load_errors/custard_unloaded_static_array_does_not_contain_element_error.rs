@@ -6,7 +6,9 @@ pub struct CustardUnloadedStaticArrayDoesNotContainElementError<T: Debug> {
 	pub offending_key: T,
 }
 
-impl<T: Debug> Display for CustardUnloadedStaticArrayDoesNotContainElementError<T> {
+impl<T: Debug> Display
+	for CustardUnloadedStaticArrayDoesNotContainElementError<T>
+{
 	//TODO: this should work in display_from_debug
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "{:?}", self)

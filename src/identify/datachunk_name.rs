@@ -10,7 +10,10 @@ pub struct FullDatachunkName {
 
 impl FullDatachunkName {
 	pub fn new(crate_name: String, datachunk_name: String) -> Self {
-		Self { crate_name: CrateName::new(crate_name), datachunk_name: DatachunkName::new(datachunk_name) }
+		Self {
+			crate_name: CrateName::new(crate_name),
+			datachunk_name: DatachunkName::new(datachunk_name),
+		}
 	}
 }
 

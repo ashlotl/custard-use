@@ -31,25 +31,50 @@ pub struct LoadedCrate {
 }
 
 impl LoadedCrate {
-	pub fn new(name: &CrateName, unloaded_crate: &UnloadedCrate, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>, mut old_crate: Option<&mut (BTreeMap<TaskName, LoadedTask>, BTreeMap<DatachunkName, LoadedDatachunk>)>) -> Result<Self, Box<dyn Error>> {
+	pub fn new(
+		name: &CrateName,
+		unloaded_crate: &UnloadedCrate,
+		recompile: LibraryRecompile,
+		debug: DebugMode,
+		drop_list: Rc<RefCell<Vec<libloading::Library>>>,
+		mut old_crate: Option<&mut (
+			BTreeMap<TaskName, LoadedTask>,
+			BTreeMap<DatachunkName, LoadedDatachunk>,
+		)>,
+	) -> Result<Self, Box<dyn Error>> {
 		let core_library = match &unloaded_crate.lib {
 			Some(v) => v,
-			None => return Err(Box::new(CustardCompositionRequiresCoreCrateError { offending_crate: name.clone() })),
+			None => {
+				return Err(Box::new(
+					CustardCompositionRequiresCoreCrateError {
+						offending_crate: name.clone(),
+					},
+				))
+			}
 		};
-		let user_library = UserLibrary::new(name.clone(), recompile, debug, drop_list)?;
+		let user_library =
+			UserLibrary::new(name.clone(), recompile, debug, drop_list)?;
 		let mut datachunks = BTreeMap::new();
 
 		for (datachunk_name, unloaded_datachunk) in &unloaded_crate.datachunks {
 			datachunks.insert(datachunk_name.clone(), {
 				let mut datachunk = None;
 				if let Some(old_crate) = &mut old_crate {
-					if let Some(old_datachunk) = old_crate.1.remove(datachunk_name) {
+					if let Some(old_datachunk) =
+						old_crate.1.remove(datachunk_name)
+					{
 						datachunk = Some(old_datachunk);
 					}
 				}
 				match datachunk {
 					Some(v) => Some(v),
-					None => Some(LoadedDatachunk::new(unloaded_datachunk, &user_library, &core_library)?),
+					None => {
+						Some(LoadedDatachunk::new(
+							unloaded_datachunk,
+							&user_library,
+							&core_library,
+						)?)
+					}
 				}
 			});
 		}
@@ -57,7 +82,10 @@ impl LoadedCrate {
 		let mut fulfillers = BTreeMap::new();
 
 		for (task_name, unloaded_task) in &unloaded_crate.tasks {
-			let full_name = FullTaskName { crate_name: name.clone(), task_name: task_name.clone() };
+			let full_name = FullTaskName {
+				crate_name: name.clone(),
+				task_name: task_name.clone(),
+			};
 			let fulfiller = Fulfiller {
 				cease: Mutex::new(false),
 				error: Mutex::new(false),
@@ -73,13 +101,23 @@ impl LoadedCrate {
 					}
 					match task {
 						Some(v) => Some(v),
-						None => Some(LoadedTask::new(full_name, unloaded_task, &user_library, &core_library)?),
+						None => {
+							Some(LoadedTask::new(
+								full_name,
+								unloaded_task,
+								&user_library,
+								&core_library,
+							)?)
+						}
 					}
 				},
 			};
 			fulfillers.insert(task_name.clone(), Arc::new(fulfiller));
 		}
 
-		Ok(Self { datachunks, tasks: fulfillers })
+		Ok(Self {
+			datachunks,
+			tasks: fulfillers,
+		})
 	}
 }

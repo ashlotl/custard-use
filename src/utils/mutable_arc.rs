@@ -7,7 +7,9 @@ pub struct MutableArc<T: ?Sized> {
 
 impl<T: ?Sized> Clone for MutableArc<T> {
 	fn clone(&self) -> Self {
-		Self { data: self.data.clone() }
+		Self {
+			data: self.data.clone(),
+		}
 	}
 }
 

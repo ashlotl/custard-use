@@ -27,7 +27,9 @@ where
 	WrongType,
 }
 
-impl<'a, Mutability: Debug, A: Datachunkable> DatachunkGetterResult<DatachunkWrapper<Mutability, A>, A> {
+impl<'a, Mutability: Debug, A: Datachunkable>
+	DatachunkGetterResult<DatachunkWrapper<Mutability, A>, A>
+{
 	pub fn or_panic(self) -> DatachunkWrapper<Mutability, A> {
 		if let Self::Ok(v) = self {
 			return v;
@@ -42,18 +44,30 @@ pub struct DatachunkGetter {
 }
 
 impl DatachunkGetter {
-	pub fn new(crate_table: MutableArc<BTreeMap<CrateName, LoadedCrate>>, accesses: Vec<Access>) -> Self {
-		Self { crate_table, accesses }
+	pub fn new(
+		crate_table: MutableArc<BTreeMap<CrateName, LoadedCrate>>,
+		accesses: Vec<Access>,
+	) -> Self {
+		Self {
+			crate_table,
+			accesses,
+		}
 	}
 
-	fn check_access(&self, name: &FullDatachunkName, mutable: AccessType) -> bool {
+	fn check_access(
+		&self,
+		name: &FullDatachunkName,
+		mutable: AccessType,
+	) -> bool {
 		let mut found = false;
 
 		for access in &self.accesses {
 			if &access.of == name
 				&& match mutable {
 					AccessType::ImmutableAccess => true,
-					AccessType::MutableAccess => access.mut_immut == AccessType::MutableAccess,
+					AccessType::MutableAccess => {
+						access.mut_immut == AccessType::MutableAccess
+					}
 				} {
 				found = true;
 				break;
@@ -62,45 +76,79 @@ impl DatachunkGetter {
 		found
 	}
 
-	fn get<Mutability, T: Datachunkable>(&self, name: &FullDatachunkName) -> DatachunkGetterResult<DatachunkWrapper<Mutability, T>, T> {
+	fn get<Mutability, T: Datachunkable>(
+		&self,
+		name: &FullDatachunkName,
+	) -> DatachunkGetterResult<DatachunkWrapper<Mutability, T>, T> {
 		println!("crate table: {:#?}", self.crate_table);
 		match self.crate_table.get().get(&name.crate_name) {
-			Some(loaded_crate) => match loaded_crate.datachunks.get(&name.datachunk_name) {
-				Some(loaded_datachunk) => {
-					let dyn_object = loaded_datachunk.as_ref().unwrap().user_data.clone();
-					let v = unsafe {
-						match (&mut *(dyn_object.get_mut() as *mut dyn Datachunkable)).downcast_mut::<T>() {
-							Some(v) => v,
-							None => return DatachunkGetterResult::WrongType,
-						}
-					};
-					return DatachunkGetterResult::Ok(DatachunkWrapper { phantom: PhantomData::default(), inner: v, _preserve_lifetime: dyn_object });
+			Some(loaded_crate) => {
+				match loaded_crate.datachunks.get(&name.datachunk_name) {
+					Some(loaded_datachunk) => {
+						let dyn_object = loaded_datachunk
+							.as_ref()
+							.unwrap()
+							.user_data
+							.clone();
+						let v = unsafe {
+							match (&mut *(dyn_object.get_mut()
+								as *mut dyn Datachunkable))
+								.downcast_mut::<T>()
+							{
+								Some(v) => v,
+								None => {
+									return DatachunkGetterResult::WrongType
+								}
+							}
+						};
+						return DatachunkGetterResult::Ok(DatachunkWrapper {
+							phantom: PhantomData::default(),
+							inner: v,
+							_preserve_lifetime: dyn_object,
+						});
+					}
+					None => {
+						return DatachunkGetterResult::DatachunkNotInCrate;
+					}
 				}
-				None => {
-					return DatachunkGetterResult::DatachunkNotInCrate;
-				}
-			},
+			}
 			None => {
 				return DatachunkGetterResult::CrateNotFound;
 			}
 		}
 	}
 
-	pub fn get_immut<T: Datachunkable>(&self, name: &FullDatachunkName) -> DatachunkGetterResult<DatachunkWrapper<Immutable, T>, T> {
+	pub fn get_immut<T: Datachunkable>(
+		&self,
+		name: &FullDatachunkName,
+	) -> DatachunkGetterResult<DatachunkWrapper<Immutable, T>, T> {
 		if !self.check_access(name, AccessType::ImmutableAccess) {
 			return DatachunkGetterResult::NoImmutableAccessAllowed;
 		}
 		match self.get(name) {
 			DatachunkGetterResult::Ok(v) => DatachunkGetterResult::Ok(v),
-			DatachunkGetterResult::CrateNotFound => DatachunkGetterResult::CrateNotFound,
-			DatachunkGetterResult::DatachunkNotInCrate => DatachunkGetterResult::DatachunkNotInCrate,
-			DatachunkGetterResult::NoImmutableAccessAllowed => DatachunkGetterResult::NoImmutableAccessAllowed,
-			DatachunkGetterResult::NoMutableAccessAllowed => DatachunkGetterResult::NoMutableAccessAllowed,
-			DatachunkGetterResult::WrongType => DatachunkGetterResult::WrongType,
+			DatachunkGetterResult::CrateNotFound => {
+				DatachunkGetterResult::CrateNotFound
+			}
+			DatachunkGetterResult::DatachunkNotInCrate => {
+				DatachunkGetterResult::DatachunkNotInCrate
+			}
+			DatachunkGetterResult::NoImmutableAccessAllowed => {
+				DatachunkGetterResult::NoImmutableAccessAllowed
+			}
+			DatachunkGetterResult::NoMutableAccessAllowed => {
+				DatachunkGetterResult::NoMutableAccessAllowed
+			}
+			DatachunkGetterResult::WrongType => {
+				DatachunkGetterResult::WrongType
+			}
 		}
 	}
 
-	pub fn get_mut<T: Datachunkable>(&self, name: &FullDatachunkName) -> DatachunkGetterResult<DatachunkWrapper<Mutable, T>, T> {
+	pub fn get_mut<T: Datachunkable>(
+		&self,
+		name: &FullDatachunkName,
+	) -> DatachunkGetterResult<DatachunkWrapper<Mutable, T>, T> {
 		if !self.check_access(name, AccessType::MutableAccess) {
 			return DatachunkGetterResult::NoMutableAccessAllowed;
 		}

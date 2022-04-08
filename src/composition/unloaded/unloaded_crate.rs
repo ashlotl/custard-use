@@ -1,5 +1,7 @@
 use crate::{
-	composition::unloaded::{unloaded_datachunk::UnloadedDatachunk, unloaded_task::UnloadedTask},
+	composition::unloaded::{
+		unloaded_datachunk::UnloadedDatachunk, unloaded_task::UnloadedTask,
+	},
 	dylib_management::safe_library::core_library::CoreLibrary,
 	identify::{datachunk_name::DatachunkName, task_name::TaskName},
 };

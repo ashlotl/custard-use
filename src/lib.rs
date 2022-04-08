@@ -1,4 +1,5 @@
 #![feature(arbitrary_self_types)]
+#![feature(negative_impls)]
 #![feature(path_try_exists)]
 #![feature(try_trait_v2)]
 

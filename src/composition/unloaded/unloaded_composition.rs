@@ -1,10 +1,15 @@
 use crate::{
-	composition::unloaded::{unloaded_crate::UnloadedCrate, unloaded_task::UnloadedTask},
+	composition::unloaded::{
+		unloaded_crate::UnloadedCrate, unloaded_task::UnloadedTask,
+	},
 	dylib_management::safe_library::{
 		core_library::CoreLibrary,
 		safe_library::{DebugMode, LibraryRecompile, SafeLibrary},
 	},
-	errors::parse_errors::{custard_composition_cycle_error::CustardCompositionCycleError, custard_ron_parse_error::CustardRonCompositionParseError},
+	errors::parse_errors::{
+		custard_composition_cycle_error::CustardCompositionCycleError,
+		custard_ron_parse_error::CustardRonCompositionParseError,
+	},
 	identify::{crate_name::CrateName, task_name::FullTaskName},
 };
 
@@ -19,7 +24,8 @@ use std::{
 };
 
 /// Set this variable to allow crate dependencies to cycle. This is not reccomended for dependency management reasons.
-const ENVIRONMENT_VAR_STR_ALLOW_DEPENDENCY_CYCLES: &'static str = "CUSTARD_ALLOW_DEPENDENCY_CYCLES";
+const ENVIRONMENT_VAR_STR_ALLOW_DEPENDENCY_CYCLES: &'static str =
+	"CUSTARD_ALLOW_DEPENDENCY_CYCLES";
 
 /// Stores the fundamental information about a composition before user crates are dynamically loaded.
 #[derive(Debug, Deserialize)]
@@ -47,14 +53,26 @@ impl UnloadedComposition {
 	/// some_other_func(some_string);//almost certainly segfaults because some_string no longer points to memory that belongs to us
 	/// ```
 	/// To save on headaches all of this is handled by [CustardInstance](crate::custard_instance::CustardInstance), but this method and struct are left public because it may be useful at runtime to study the present composition, and check it before a reload (keep in mind, reloads--see [CustardInstance](crate::custard_instance::CustardInstance)--run the risk of panicking if not carefully checked before initiation).
-	pub unsafe fn from_string(to_deserialize: String, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
-		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(to_deserialize.as_str());
+	pub unsafe fn from_string(
+		to_deserialize: String,
+		recompile: LibraryRecompile,
+		debug: DebugMode,
+		drop_list: Rc<RefCell<Vec<libloading::Library>>>,
+	) -> Result<Self, Box<dyn Error>> {
+		let res: Result<UnloadedComposition, ron::Error> =
+			ron::from_str(to_deserialize.as_str());
 		let mut to_return = match res {
 			Ok(v) => v,
-			Err(error) => return Err(Box::new(CustardRonCompositionParseError { error, relevant_ron: to_deserialize })),
+			Err(error) => {
+				return Err(Box::new(CustardRonCompositionParseError {
+					error,
+					relevant_ron: to_deserialize,
+				}))
+			}
 		};
 
-		let mut traversal_tree = BTreeMap::<Option<CrateName>, Vec<CrateName>>::new();
+		let mut traversal_tree =
+			BTreeMap::<Option<CrateName>, Vec<CrateName>>::new();
 
 		traversal_tree.insert(None, to_return.children.clone());
 
@@ -64,13 +82,23 @@ impl UnloadedComposition {
 			for child_i in 0..to_return.children.len() {
 				should_break = false;
 
-				if traversal_tree.contains_key(&Some(to_return.children[child_i].clone())) {
+				if traversal_tree
+					.contains_key(&Some(to_return.children[child_i].clone()))
+				{
 					should_break = true;
 					continue;
 				}
-				let mut child_composition = Self::from_crate(to_return.children[child_i].clone(), recompile.clone(), debug.clone(), drop_list.clone())?;
+				let mut child_composition = Self::from_crate(
+					to_return.children[child_i].clone(),
+					recompile.clone(),
+					debug.clone(),
+					drop_list.clone(),
+				)?;
 
-				traversal_tree.insert(Some(to_return.children[child_i].clone()), child_composition.children.clone());
+				traversal_tree.insert(
+					Some(to_return.children[child_i].clone()),
+					child_composition.children.clone(),
+				);
 
 				to_return.crates.append(&mut child_composition.crates);
 				to_return.children.append(&mut child_composition.children); //mutable access, order relative to traversal_tree insert
@@ -84,14 +112,22 @@ impl UnloadedComposition {
 		} {
 			//prevent a dependency cycle
 			let mut traversal_tree_traversal_list = vec![];
-			Self::recurse_crate_traversal_tree(&traversal_tree, &mut traversal_tree_traversal_list, None)?;
+			Self::recurse_crate_traversal_tree(
+				&traversal_tree,
+				&mut traversal_tree_traversal_list,
+				None,
+			)?;
 		}
 
 		Ok(to_return)
 	}
 
 	/// Determine if two tasks are unsynchronized. This is determined by doing a search of their ancestors and seeing if they reach a common ancestor (in which case they are unsynchronized) before each other (in which case they must be synchronized).
-	pub fn are_tasks_unsynchronized(&self, task_name: FullTaskName, other_task_name: FullTaskName) -> bool {
+	pub fn are_tasks_unsynchronized(
+		&self,
+		task_name: FullTaskName,
+		other_task_name: FullTaskName,
+	) -> bool {
 		let mut first_ab = true;
 		let mut found_ab = false;
 
@@ -135,22 +171,40 @@ impl UnloadedComposition {
 		!(found_ab && found_ba)
 	}
 
-	fn recurse_crate_traversal_tree(traversal_tree: &BTreeMap<Option<CrateName>, Vec<CrateName>>, traversal_tree_traversal_list: &mut Vec<Option<CrateName>>, active_node: Option<CrateName>) -> Result<(), Box<dyn Error>> {
+	fn recurse_crate_traversal_tree(
+		traversal_tree: &BTreeMap<Option<CrateName>, Vec<CrateName>>,
+		traversal_tree_traversal_list: &mut Vec<Option<CrateName>>,
+		active_node: Option<CrateName>,
+	) -> Result<(), Box<dyn Error>> {
 		traversal_tree_traversal_list.push(active_node.clone());
 		for subnode in traversal_tree.get(&active_node).unwrap() {
 			if traversal_tree_traversal_list.contains(&Some(subnode.clone())) {
-				return Err(Box::new(CustardCompositionCycleError { offending_crate: active_node.clone() }));
+				return Err(Box::new(CustardCompositionCycleError {
+					offending_crate: active_node.clone(),
+				}));
 			}
-			Self::recurse_crate_traversal_tree(traversal_tree, traversal_tree_traversal_list, Some(subnode.clone()))?;
+			Self::recurse_crate_traversal_tree(
+				traversal_tree,
+				traversal_tree_traversal_list,
+				Some(subnode.clone()),
+			)?;
 		}
 		traversal_tree_traversal_list.pop();
 		Ok(())
 	}
 
-	fn from_crate(crate_name: CrateName, recompile: LibraryRecompile, debug: DebugMode, drop_list: Rc<RefCell<Vec<libloading::Library>>>) -> Result<Self, Box<dyn Error>> {
-		let loaded = Rc::new(CoreLibrary::new(crate_name, recompile, debug, drop_list)?);
-		let composition_string = ((loaded.symbols.as_ref().unwrap().composition)()).into_rust()?;
-		let res: Result<UnloadedComposition, ron::Error> = ron::from_str(composition_string.as_str());
+	fn from_crate(
+		crate_name: CrateName,
+		recompile: LibraryRecompile,
+		debug: DebugMode,
+		drop_list: Rc<RefCell<Vec<libloading::Library>>>,
+	) -> Result<Self, Box<dyn Error>> {
+		let loaded =
+			Rc::new(CoreLibrary::new(crate_name, recompile, debug, drop_list)?);
+		let composition_string =
+			((loaded.symbols.as_ref().unwrap().composition)()).into_rust()?;
+		let res: Result<UnloadedComposition, ron::Error> =
+			ron::from_str(composition_string.as_str());
 
 		return match res {
 			Ok(mut v) => {
@@ -159,17 +213,29 @@ impl UnloadedComposition {
 				}
 				Ok(v)
 			}
-			Err(error) => return Err(Box::new(CustardRonCompositionParseError { error, relevant_ron: composition_string })),
+			Err(error) => {
+				return Err(Box::new(CustardRonCompositionParseError {
+					error,
+					relevant_ron: composition_string,
+				}))
+			}
 		};
 	}
 
-	pub fn get_best_last_node_for_fulfiller_chain(&self, traversed: &BTreeSet<FullTaskName>) -> Option<FullTaskName> {
+	pub fn get_best_last_node_for_fulfiller_chain(
+		&self,
+		traversed: &BTreeSet<FullTaskName>,
+	) -> Option<FullTaskName> {
 		let mut candidates: Vec<(FullTaskName, usize)> = vec![];
 		for (crate_name, unloaded_crate) in &self.crates {
 			for (task_name, _) in &unloaded_crate.tasks {
-				let full_name = FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() };
+				let full_name = FullTaskName {
+					crate_name: crate_name.clone(),
+					task_name: task_name.clone(),
+				};
 				if !traversed.contains(&full_name) {
-					let child_count = self.get_children_of(&full_name, |_, _| true).len();
+					let child_count =
+						self.get_children_of(&full_name, |_, _| true).len();
 					if candidates.len() == 0 {
 						candidates.push((full_name, child_count));
 					} else {
@@ -189,12 +255,21 @@ impl UnloadedComposition {
 		None
 	}
 
-	pub fn get_children_of(&self, parent_name: &FullTaskName, rule: impl Fn(&FullTaskName, &UnloadedTask) -> bool) -> Vec<FullTaskName> {
+	pub fn get_children_of(
+		&self,
+		parent_name: &FullTaskName,
+		rule: impl Fn(&FullTaskName, &UnloadedTask) -> bool,
+	) -> Vec<FullTaskName> {
 		let mut ret = vec![];
 		for (crate_name, unloaded_crate) in &self.crates {
 			for (task_name, unloaded_task) in &unloaded_crate.tasks {
-				let full_name = FullTaskName { crate_name: crate_name.clone(), task_name: task_name.clone() };
-				if unloaded_task.parents.contains(parent_name) && rule(&full_name, unloaded_task) {
+				let full_name = FullTaskName {
+					crate_name: crate_name.clone(),
+					task_name: task_name.clone(),
+				};
+				if unloaded_task.parents.contains(parent_name)
+					&& rule(&full_name, unloaded_task)
+				{
 					ret.push(full_name);
 				}
 			}
@@ -202,7 +277,10 @@ impl UnloadedComposition {
 		ret
 	}
 
-	pub fn get_unloaded_task(&self, find_name: &FullTaskName) -> Option<&UnloadedTask> {
+	pub fn get_unloaded_task(
+		&self,
+		find_name: &FullTaskName,
+	) -> Option<&UnloadedTask> {
 		for (crate_name, crate_contents) in &self.crates {
 			if crate_name != &find_name.crate_name {
 				continue;
@@ -216,7 +294,14 @@ impl UnloadedComposition {
 		return None;
 	}
 
-	pub fn traverse_until<'a>(&'a self, current_node: &'a FullTaskName, traversal_list: &mut Vec<FullTaskName>, for_each: Rc<RefCell<dyn FnMut(&'a FullTaskName, &'a UnloadedTask) -> bool + 'a>>) -> bool {
+	pub fn traverse_until<'a>(
+		&'a self,
+		current_node: &'a FullTaskName,
+		traversal_list: &mut Vec<FullTaskName>,
+		for_each: Rc<
+			RefCell<dyn FnMut(&'a FullTaskName, &'a UnloadedTask) -> bool + 'a>,
+		>,
+	) -> bool {
 		if traversal_list.contains(current_node) {
 			return false;
 		}

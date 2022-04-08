@@ -10,7 +10,10 @@ pub struct FullTaskName {
 
 impl FullTaskName {
 	pub fn new(crate_name: String, task_name: String) -> Self {
-		Self { crate_name: CrateName::new(crate_name), task_name: TaskName::new(task_name) }
+		Self {
+			crate_name: CrateName::new(crate_name),
+			task_name: TaskName::new(task_name),
+		}
 	}
 }
 

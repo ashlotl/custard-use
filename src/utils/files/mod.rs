@@ -1,6 +1,9 @@
 use std::{fs, path::Path};
 
-pub fn get_maybe_const_string<P: AsRef<Path>>(path: P, if_fail: &str) -> (String, bool) {
+pub fn get_maybe_const_string<P: AsRef<Path>>(
+	path: P,
+	if_fail: &str,
+) -> (String, bool) {
 	if let Ok(v) = fs::read_to_string(path) {
 		(v, true) //the file could be found
 	} else {
